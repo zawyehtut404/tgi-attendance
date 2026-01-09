@@ -11,10 +11,8 @@ function App() {
   const [selectedName, setSelectedName] = useState('');
   const [alert, setAlert] = useState({ show: false, message: '', type: '' });
   
-  // Real-time Clock State
   const [currentTimeDisplay, setCurrentTimeDisplay] = useState(new Date());
 
-  // Clock Update Effect
   useEffect(() => {
     const timer = setInterval(() => {
       setCurrentTimeDisplay(new Date());
@@ -79,7 +77,6 @@ function App() {
 
     const now = new Date();
     const todayStr = now.toLocaleDateString('en-GB');
-    // Database ထဲသို့ ထည့်မည့်အချိန် (AM/PM format)
     const timeForDB = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true });
 
     try {
@@ -174,7 +171,6 @@ function App() {
         </div>
         <h1 style={styles.mainTitle}>TGI Attendance System</h1>
         
-        {/* Real-time Clock UI */}
         <div style={styles.clockContainer}>
           <div style={styles.realTimeClock}>
             {currentTimeDisplay.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
@@ -235,6 +231,11 @@ function App() {
           </table>
         </div>
       </div>
+
+      {/* Footer Section */}
+      <footer style={styles.footer}>
+        <p style={styles.footerText}>Dev by <strong>Htut</strong></p>
+      </footer>
     </div>
   );
 }
@@ -247,34 +248,35 @@ const styles = {
   logoCircle: { width: '80px', height: '80px', borderRadius: '50%', backgroundColor: '#fff', margin: '0 auto 15px', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' },
   logoImg: { width: '100%', height: 'auto' },
   mainTitle: { margin: 0, color: '#1e293b', fontSize: '28px', fontWeight: '800' },
-  
-  // Clock Styles
   clockContainer: { marginTop: '15px', padding: '10px', borderRadius: '20px', backgroundColor: 'rgba(255,255,255,0.5)' },
   realTimeClock: { fontSize: '36px', fontWeight: '700', color: '#3b82f6', letterSpacing: '2px' },
   realDate: { fontSize: '14px', color: '#64748b', fontWeight: '500', marginTop: '5px' },
-
   card: { padding: '30px 40px', backgroundColor: '#fff', borderRadius: '28px', width: '100%', maxWidth: '450px', marginBottom: '40px', boxShadow: '0 20px 40px rgba(0,0,0,0.04)' },
   inputGroup: { marginBottom: '20px' },
   label: { display: 'block', marginBottom: '10px', fontSize: '14px', fontWeight: '600', color: '#475569' },
   select: { width: '100%', padding: '16px', borderRadius: '16px', border: '2px solid #e2e8f0', fontSize: '16px', outline: 'none' },
-  downloadBtn: { width: '100%', backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '14px', borderRadius: '14px', cursor: 'pointer', fontWeight: '700', marginBottom: '25px', transition: '0.3s' },
+  downloadBtn: { width: '100%', backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '14px', borderRadius: '14px', cursor: 'pointer', fontWeight: '700', marginBottom: '25px' },
   buttonGroup: { display: 'flex', gap: '15px' },
-  button: { flex: 1, padding: '18px', color: '#fff', border: 'none', borderRadius: '16px', cursor: 'pointer', fontWeight: '700', transition: '0.3s' },
+  button: { flex: 1, padding: '18px', color: '#fff', border: 'none', borderRadius: '16px', cursor: 'pointer', fontWeight: '700' },
   btnIn: { backgroundColor: '#10b981' }, btnOut: { backgroundColor: '#f43f5e' },
-  tableCard: { width: '100%', maxWidth: '900px', backgroundColor: '#fff', padding: '30px', borderRadius: '32px', boxShadow: '0 10px 30px rgba(0,0,0,0.02)' },
+  tableCard: { width: '100%', maxWidth: '900px', backgroundColor: '#fff', padding: '30px', borderRadius: '32px', boxShadow: '0 10px 30px rgba(0,0,0,0.02)', marginBottom: '40px' },
   tableHeaderSection: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px' },
   tableTitle: { margin: 0, fontSize: '20px', color: '#1e293b' },
   refreshBtn: { border: '1px solid #e2e8f0', background: '#fff', padding: '10px 18px', borderRadius: '12px', cursor: 'pointer', fontWeight: '600' },
   tableWrapper: { overflowX: 'auto' },
   table: { width: '100%', borderCollapse: 'separate', borderSpacing: '0 8px' },
-  th: { textAlign: 'left', padding: '15px', color: '#94a3b8', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '1px' },
+  th: { textAlign: 'left', padding: '15px', color: '#94a3b8', fontSize: '12px', textTransform: 'uppercase' },
   tableRow: { backgroundColor: '#f8fafc' },
   td: { padding: '18px 15px', color: '#334155' },
   inTime: { color: '#059669', fontWeight: '700' },
   outTime: { color: '#e11d48', fontWeight: '700' },
   durationBadge: { backgroundColor: '#3b82f6', color: '#fff', padding: '6px 12px', borderRadius: '10px', fontSize: '13px', fontWeight: '600' },
   emptyBadge: { color: '#cbd5e1' },
-  noData: { textAlign: 'center', padding: '50px', color: '#94a3b8' }
+  noData: { textAlign: 'center', padding: '50px', color: '#94a3b8' },
+
+  // Footer Style
+  footer: { marginTop: 'auto', padding: '20px 0', width: '100%', textAlign: 'center' },
+  footerText: { color: '#94a3b8', fontSize: '14px', margin: 0, letterSpacing: '0.5px' }
 };
 
 export default App;
