@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 
 // --- API Configuration ---
@@ -22,7 +22,13 @@ function App() {
     return () => clearInterval(timer);
   }, []);
 
-  const fetchData = async () => {
+  const showAlert = useCallback((msg, type) => {
+    setAlert({ show: true, message: msg, type: type });
+    setTimeout(() => setAlert(prev => ({ ...prev, show: false })), 4000);
+  }, []);
+
+  // fetchData ကို useCallback ဖြင့် ပတ်လိုက်ခြင်းဖြင့် ESLint warning/error ကင်းစင်သွားပါမည်
+  const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       const empRes = await axios.get(EMP_URL);
@@ -36,9 +42,11 @@ function App() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [showAlert]);
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { 
+    fetchData(); 
+  }, [fetchData]);
 
   const calculateDuration = (inTime, outTime) => {
     if (!inTime || !outTime) return "-";
@@ -67,11 +75,6 @@ function App() {
       const mins = totalMinutes % 60;
       return `${hrs}h ${mins}m`;
     } catch (e) { return "-"; }
-  };
-
-  const showAlert = (msg, type) => {
-    setAlert({ show: true, message: msg, type: type });
-    setTimeout(() => setAlert(prev => ({ ...prev, show: false })), 4000);
   };
 
   const handleAttendance = async (actionType) => {
