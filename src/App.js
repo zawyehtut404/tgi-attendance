@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
+// --- API Configuration ---
 const API_URL = "https://api.sheetbest.com/sheets/30473ef1-d688-4651-806e-dcb573467fef/tabs/Attendance";
 const EMP_URL = "https://api.sheetbest.com/sheets/30473ef1-d688-4651-806e-dcb573467fef/tabs/Employees";
 
@@ -13,6 +14,7 @@ function App() {
   
   const [currentTimeDisplay, setCurrentTimeDisplay] = useState(new Date());
 
+  // Real-time Clock Effect
   useEffect(() => {
     const timer = setInterval(() => {
       setCurrentTimeDisplay(new Date());
@@ -25,9 +27,10 @@ function App() {
     try {
       const empRes = await axios.get(EMP_URL);
       const attRes = await axios.get(API_URL);
-      setEmployeeList(empRes.data);
+      setEmployeeList(Array.isArray(empRes.data) ? empRes.data : []);
       const todayStr = new Date().toLocaleDateString('en-GB');
-      setSummaryRecords(attRes.data.filter(r => r.Date === todayStr));
+      const filtered = Array.isArray(attRes.data) ? attRes.data.filter(r => r.Date === todayStr) : [];
+      setSummaryRecords(filtered);
     } catch (err) {
       showAlert("Data ဆွဲယူ၍ မရပါ", "error");
     } finally {
@@ -81,7 +84,7 @@ function App() {
 
     try {
       const checkRes = await axios.get(API_URL);
-      const allRecords = checkRes.data;
+      const allRecords = Array.isArray(checkRes.data) ? checkRes.data : [];
       const existingIdx = allRecords.findIndex(r => r.Name === selectedName && r.Date === todayStr);
       const existingRecord = existingIdx !== -1 ? allRecords[existingIdx] : null;
 
@@ -232,7 +235,6 @@ function App() {
         </div>
       </div>
 
-      {/* Footer Section */}
       <footer style={styles.footer}>
         <p style={styles.footerText}>Dev by <strong>Htut</strong></p>
       </footer>
@@ -273,8 +275,6 @@ const styles = {
   durationBadge: { backgroundColor: '#3b82f6', color: '#fff', padding: '6px 12px', borderRadius: '10px', fontSize: '13px', fontWeight: '600' },
   emptyBadge: { color: '#cbd5e1' },
   noData: { textAlign: 'center', padding: '50px', color: '#94a3b8' },
-
-  // Footer Style
   footer: { marginTop: 'auto', padding: '20px 0', width: '100%', textAlign: 'center' },
   footerText: { color: '#94a3b8', fontSize: '14px', margin: 0, letterSpacing: '0.5px' }
 };
