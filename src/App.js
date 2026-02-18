@@ -1,9 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import axios from 'axios';
 
-// --- API Configuration ---
-const API_URL = "https://api.sheetbest.com/sheets/30473ef1-d688-4651-806e-dcb573467fef/tabs/Attendance";
-const EMP_URL = "https://api.sheetbest.com/sheets/30473ef1-d688-4651-806e-dcb573467fef/tabs/Employees";
+// --- Google Apps Script Configuration ---
+const BASE_URL = "https://script.google.com/macros/s/AKfycbxZ3brn_-Z-TxRR2U9OicQWvRvAlouTs9Dh0UAkdBuPbGuQxYuZ7ddhCBHmhsG9prAU/exec";
 
 function App() {
   const [employeeList, setEmployeeList] = useState([]);
@@ -27,18 +25,21 @@ function App() {
     setTimeout(() => setAlert(prev => ({ ...prev, show: false })), 4000);
   }, []);
 
-  // fetchData ကို useCallback ဖြင့် ပတ်လိုက်ခြင်းဖြင့် ESLint warning/error ကင်းစင်သွားပါမည်
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const empRes = await axios.get(EMP_URL);
-      const attRes = await axios.get(API_URL);
-      setEmployeeList(Array.isArray(empRes.data) ? empRes.data : []);
+      const empRes = await fetch(`${BASE_URL}?tab=Employees`);
+      const empData = await empRes.json();
+      setEmployeeList(Array.isArray(empData) ? empData : []);
+
+      const attRes = await fetch(`${BASE_URL}?tab=Attendance`);
+      const attData = await attRes.json();
+      
       const todayStr = new Date().toLocaleDateString('en-GB');
-      const filtered = Array.isArray(attRes.data) ? attRes.data.filter(r => r.Date === todayStr) : [];
+      const filtered = Array.isArray(attData) ? attData.filter(r => r.Date === todayStr) : [];
       setSummaryRecords(filtered);
     } catch (err) {
-      showAlert("Data ဆွဲယူ၍ မရပါ", "error");
+      showAlert("Data ဆွဲယူ၍ မရပါ (GAS Connection Error)", "error");
     } finally {
       setLoading(false);
     }
@@ -86,10 +87,11 @@ function App() {
     const timeForDB = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true });
 
     try {
-      const checkRes = await axios.get(API_URL);
-      const allRecords = Array.isArray(checkRes.data) ? checkRes.data : [];
-      const existingIdx = allRecords.findIndex(r => r.Name === selectedName && r.Date === todayStr);
-      const existingRecord = existingIdx !== -1 ? allRecords[existingIdx] : null;
+      const res = await fetch(`${BASE_URL}?tab=Attendance`);
+      const allRecords = await res.json();
+      const existingRecord = allRecords.find(r => r.Name === selectedName && r.Date === todayStr);
+
+      let payload = { Name: selectedName, Date: todayStr };
 
       if (actionType === 'ClockIn') {
         if (existingRecord && existingRecord.ClockIn) {
@@ -97,9 +99,9 @@ function App() {
           setLoading(false);
           return;
         }
-      }
-
-      if (actionType === 'ClockOut') {
+        payload.ClockIn = timeForDB;
+        payload.action = "insert";
+      } else {
         if (!existingRecord || !existingRecord.ClockIn) {
           showAlert("Clock In အရင်လုပ်ရန် လိုအပ်သည်", "warning");
           setLoading(false);
@@ -110,30 +112,21 @@ function App() {
           setLoading(false);
           return;
         }
+        payload.ClockOut = timeForDB;
+        payload.Duration = calculateDuration(existingRecord.ClockIn, timeForDB);
+        payload.action = "update";
       }
 
-      if (existingIdx !== -1) {
-        let updateData = {};
-        if (actionType === 'ClockOut') {
-          const duration = calculateDuration(existingRecord.ClockIn, timeForDB);
-          updateData = { ClockOut: `'${timeForDB}`, Duration: `'${duration}` };
-        } else {
-          updateData = { ClockIn: `'${timeForDB}` };
-        }
-        await axios.patch(`${API_URL}/${existingIdx}`, updateData);
-      } else {
-        await axios.post(API_URL, {
-          Name: selectedName, 
-          Date: `'${todayStr}`,
-          ClockIn: actionType === 'ClockIn' ? `'${timeForDB}` : '',
-          ClockOut: actionType === 'ClockOut' ? `'${timeForDB}` : '',
-          Duration: ''
-        });
-      }
+      await fetch(BASE_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
 
       showAlert(`${selectedName} ${actionType === 'ClockIn' ? 'အလုပ်ဝင်ခြင်း' : 'အလုပ်ဆင်းခြင်း'} အောင်မြင်ပါသည်`, "success");
       setSelectedName('');
-      fetchData();
+      setTimeout(() => fetchData(), 2000);
     } catch (error) {
       showAlert("ချိတ်ဆက်မှု အမှားအယွင်းရှိပါသည်", "error");
     } finally {
@@ -158,8 +151,22 @@ function App() {
 
   return (
     <div style={styles.container}>
+      {/* သင်္ကြန်ပွဲတော် အလှဆင် ပိတောက်ပန်းများ */}
+      <img 
+        src="https://i.ibb.co/Rp5Q15X9/pngimg-com-chinese-new-year-PNG39.png" 
+        alt="Padauk Left" 
+        style={styles.flowerLeft} 
+      />
+      <img 
+        src="https://i.ibb.co/Rp5Q15X9/pngimg-com-chinese-new-year-PNG39.png" 
+        alt="Padauk Right" 
+        style={styles.flowerRight} 
+      />
+
       <style>{`
         @keyframes fadeInDown { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes sway { 0% { transform: rotate(15deg); } 50% { transform: rotate(20deg); } 100% { transform: rotate(15deg); } }
+        @keyframes swayReverse { 0% { transform: scaleX(-1) rotate(15deg); } 50% { transform: scaleX(-1) rotate(20deg); } 100% { transform: scaleX(-1) rotate(15deg); } }
         .alert-box { animation: fadeInDown 0.4s ease-out; }
         button:hover { filter: brightness(1.1); transform: translateY(-1px); }
         button:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -173,7 +180,7 @@ function App() {
 
       <div style={styles.header}>
         <div style={styles.logoCircle}>
-          <img src="https://postimage.me/images/2026/01/09/0b2cb75f-e9f1-43c1-aa40-4ea1b7b522f5-removebg-preview.png" alt="TGI Logo" style={styles.logoImg} />
+          <img src="https://i.ibb.co/Gvb5m1p5/0b2cb75f-e9f1-43c1-aa40-4ea1b7b522f5-removebg-preview.png" alt="TGI Logo" style={styles.logoImg} />
         </div>
         <h1 style={styles.mainTitle}>TGI Attendance System</h1>
         
@@ -246,34 +253,67 @@ function App() {
 }
 
 const styles = {
-  container: { padding: '40px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', backgroundColor: '#f0f4f8', minHeight: '100vh', fontFamily: "'Segoe UI', sans-serif" },
+  container: { 
+    padding: '40px 20px', 
+    display: 'flex', 
+    flexDirection: 'column', 
+    alignItems: 'center', 
+    backgroundColor: '#923636', 
+    minHeight: '100vh', 
+    fontFamily: "'Segoe UI', sans-serif",
+    position: 'relative',
+    overflowX: 'hidden'
+  },
+  flowerLeft: {
+    position: 'absolute',
+    top: '-20px',
+    left: '-20px',
+    width: '180px',
+    height: 'auto',
+    zIndex: 10,
+    animation: 'sway 4s ease-in-out infinite',
+    pointerEvents: 'none'
+  },
+  flowerRight: {
+    position: 'absolute',
+    top: '-20px',
+    right: '-20px',
+    width: '180px',
+    height: 'auto',
+    zIndex: 10,
+    animation: 'swayReverse 4s ease-in-out infinite',
+    pointerEvents: 'none'
+  },
   floatingAlert: { position: 'fixed', top: '25px', padding: '16px 30px', borderRadius: '50px', color: '#fff', zIndex: 1000, fontWeight: '600', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' },
-  success: { backgroundColor: '#10b981' }, warning: { backgroundColor: '#f59e0b' }, error: { backgroundColor: '#ef4444' },
+  success: { backgroundColor: '#10b981' }, 
+  warning: { backgroundColor: '#f59e0b' }, 
+  error: { backgroundColor: '#ef4444' },
   header: { textAlign: 'center', marginBottom: '30px' },
   logoCircle: { width: '80px', height: '80px', borderRadius: '50%', backgroundColor: '#fff', margin: '0 auto 15px', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' },
   logoImg: { width: '100%', height: 'auto' },
-  mainTitle: { margin: 0, color: '#1e293b', fontSize: '28px', fontWeight: '800' },
-  clockContainer: { marginTop: '15px', padding: '10px', borderRadius: '20px', backgroundColor: 'rgba(255,255,255,0.5)' },
+  mainTitle: { margin: 0, color: '#ffffff', fontSize: '28px', fontWeight: '800' },
+  clockContainer: { marginTop: '15px', padding: '10px', borderRadius: '20px', backgroundColor: '#935555' },
   realTimeClock: { fontSize: '36px', fontWeight: '700', color: '#3b82f6', letterSpacing: '2px' },
-  realDate: { fontSize: '14px', color: '#64748b', fontWeight: '500', marginTop: '5px' },
-  card: { padding: '30px 40px', backgroundColor: '#fff', borderRadius: '28px', width: '100%', maxWidth: '450px', marginBottom: '40px', boxShadow: '0 20px 40px rgba(0,0,0,0.04)' },
+  realDate: { fontSize: '14px', color: '#5f9bef', fontWeight: '500', marginTop: '5px' },
+  card: { padding: '30px 40px', backgroundColor: '#935555', borderRadius: '28px', width: '100%', maxWidth: '450px', marginBottom: '40px', boxShadow: '0 20px 40px rgba(0,0,0,0.04)', zIndex: 5 },
   inputGroup: { marginBottom: '20px' },
-  label: { display: 'block', marginBottom: '10px', fontSize: '14px', fontWeight: '600', color: '#475569' },
+  label: { display: 'block', marginBottom: '10px', fontSize: '14px', fontWeight: '600', color: '#e2ecf9' },
   select: { width: '100%', padding: '16px', borderRadius: '16px', border: '2px solid #e2e8f0', fontSize: '16px', outline: 'none' },
-  downloadBtn: { width: '100%', backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '14px', borderRadius: '14px', cursor: 'pointer', fontWeight: '700', marginBottom: '25px' },
+  downloadBtn: { width: '100%', backgroundColor: '#3b82f6', color: '#ffffff', border: 'none', padding: '14px', borderRadius: '14px', cursor: 'pointer', fontWeight: '700', marginBottom: '25px' },
   buttonGroup: { display: 'flex', gap: '15px' },
-  button: { flex: 1, padding: '18px', color: '#fff', border: 'none', borderRadius: '16px', cursor: 'pointer', fontWeight: '700' },
-  btnIn: { backgroundColor: '#10b981' }, btnOut: { backgroundColor: '#f43f5e' },
-  tableCard: { width: '100%', maxWidth: '900px', backgroundColor: '#fff', padding: '30px', borderRadius: '32px', boxShadow: '0 10px 30px rgba(0,0,0,0.02)', marginBottom: '40px' },
+  button: { flex: 1, padding: '18px', color: '#ffffff', border: 'none', borderRadius: '16px', cursor: 'pointer', fontWeight: '700' },
+  btnIn: { backgroundColor: '#10b981' }, 
+  btnOut: { backgroundColor: '#f43f5e' },
+  tableCard: { width: '100%', maxWidth: '900px', backgroundColor: '#935555', padding: '30px', borderRadius: '32px', boxShadow: '0 10px 30px rgba(0,0,0,0.02)', marginBottom: '40px', zIndex: 5 },
   tableHeaderSection: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px' },
-  tableTitle: { margin: 0, fontSize: '20px', color: '#1e293b' },
+  tableTitle: { margin: 0, fontSize: '20px', color: '#b3c7e6' },
   refreshBtn: { border: '1px solid #e2e8f0', background: '#fff', padding: '10px 18px', borderRadius: '12px', cursor: 'pointer', fontWeight: '600' },
   tableWrapper: { overflowX: 'auto' },
   table: { width: '100%', borderCollapse: 'separate', borderSpacing: '0 8px' },
-  th: { textAlign: 'left', padding: '15px', color: '#94a3b8', fontSize: '12px', textTransform: 'uppercase' },
-  tableRow: { backgroundColor: '#f8fafc' },
-  td: { padding: '18px 15px', color: '#334155' },
-  inTime: { color: '#059669', fontWeight: '700' },
+  th: { textAlign: 'left', padding: '15px', color: '#f3f5f8', fontSize: '12px', textTransform: 'uppercase' },
+  tableRow: { backgroundColor: '#935555' },
+  td: { padding: '18px 15px', color: '#ffffff' },
+  inTime: { color: '#9bd7c4', fontWeight: '700' },
   outTime: { color: '#e11d48', fontWeight: '700' },
   durationBadge: { backgroundColor: '#3b82f6', color: '#fff', padding: '6px 12px', borderRadius: '10px', fontSize: '13px', fontWeight: '600' },
   emptyBadge: { color: '#cbd5e1' },
