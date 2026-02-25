@@ -318,7 +318,7 @@ const styles = {
   buttonGroup: { display: 'flex', gap: '15px' },
   button: { flex: 1, padding: '18px', color: '#fff', border: 'none', borderRadius: '18px', cursor: 'pointer', fontWeight: '700', fontSize: '16px' },
   btnIn: { backgroundColor: '#059669', boxShadow: '0 4px 12px rgba(5, 150, 105, 0.2)' }, 
-  btnOut: { backgroundColor: '#dc2626', boxShadow: '0 4px 12px rgba(220, 38, 38, 0.2)' },
+  btnOut: { backgroundColor: '#451a03', boxShadow: '0 4px 12px rgba(220, 38, 38, 0.2)' },
   tableCard: { width: '100%', maxWidth: '900px', backgroundColor: '#fff', padding: '30px', borderRadius: '32px', boxShadow: '0 10px 30px rgba(0,0,0,0.03)', marginBottom: '40px', zIndex: 5, border: '1px solid #fef3c7' },
   tableHeaderSection: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px' },
   tableTitle: { margin: 0, fontSize: '20px', color: '#92400e', fontWeight: '700' },
