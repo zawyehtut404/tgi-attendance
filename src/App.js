@@ -151,26 +151,38 @@ function App() {
 
   return (
     <div style={styles.container}>
+      <style>{`
+        @keyframes fadeInDown { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes sway { 
+          0% { transform: rotate(10deg); } 
+          50% { transform: rotate(25deg); } 
+          100% { transform: rotate(10deg); } 
+        }
+        @keyframes swayReverse { 
+          0% { transform: scaleX(-1) rotate(10deg); } 
+          50% { transform: scaleX(-1) rotate(25deg); } 
+          100% { transform: scaleX(-1) rotate(10deg); } 
+        }
+        .alert-box { animation: fadeInDown 0.4s ease-out; }
+        .flower-sway { animation: sway 5s ease-in-out infinite; }
+        .flower-sway-reverse { animation: swayReverse 5s ease-in-out infinite; }
+        button:hover { filter: brightness(1.1); transform: scale(1.02); transition: all 0.2s; }
+        button:active { transform: scale(0.98); }
+      `}</style>
+
       {/* သင်္ကြန်ပွဲတော် အလှဆင် ပိတောက်ပန်းများ */}
       <img 
-        src="https://i.ibb.co/Rp5Q15X9/pngimg-com-chinese-new-year-PNG39.png" 
+        src="https://i.ibb.co/B2Zpj0bx/beautiful-yellow-padauk-flower-isolated-white-background-29544829-removebg-preview.png" 
         alt="Padauk Left" 
+        className="flower-sway"
         style={styles.flowerLeft} 
       />
       <img 
-        src="https://i.ibb.co/Rp5Q15X9/pngimg-com-chinese-new-year-PNG39.png" 
+        src="https://i.ibb.co/B2Zpj0bx/beautiful-yellow-padauk-flower-isolated-white-background-29544829-removebg-preview.png" 
         alt="Padauk Right" 
+        className="flower-sway-reverse"
         style={styles.flowerRight} 
       />
-
-      <style>{`
-        @keyframes fadeInDown { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes sway { 0% { transform: rotate(15deg); } 50% { transform: rotate(20deg); } 100% { transform: rotate(15deg); } }
-        @keyframes swayReverse { 0% { transform: scaleX(-1) rotate(15deg); } 50% { transform: scaleX(-1) rotate(20deg); } 100% { transform: scaleX(-1) rotate(15deg); } }
-        .alert-box { animation: fadeInDown 0.4s ease-out; }
-        button:hover { filter: brightness(1.1); transform: translateY(-1px); }
-        button:disabled { opacity: 0.5; cursor: not-allowed; }
-      `}</style>
 
       {alert.show && (
         <div className="alert-box" style={{ ...styles.floatingAlert, ...styles[alert.type] }}>
@@ -183,6 +195,7 @@ function App() {
           <img src="https://i.ibb.co/Gvb5m1p5/0b2cb75f-e9f1-43c1-aa40-4ea1b7b522f5-removebg-preview.png" alt="TGI Logo" style={styles.logoImg} />
         </div>
         <h1 style={styles.mainTitle}>TGI Attendance System</h1>
+        <p style={styles.subTitle}>𝐓𝐡𝐢𝐧𝐠𝐲𝐚𝐧 𝐅𝐞𝐬𝐭𝐢𝐯𝐚𝐥 𝐄𝐝𝐢𝐭𝐢𝐨𝐧 💦</p>
         
         <div style={styles.clockContainer}>
           <div style={styles.realTimeClock}>
@@ -246,7 +259,8 @@ function App() {
       </div>
 
       <footer style={styles.footer}>
-        <p style={styles.footerText}>Dev by <strong>Htut</strong></p>
+        <p style={styles.footerText}>Wishing you a happy Thingyan! 💦</p>
+        <p style={styles.devText}>Dev by <strong>Htut</strong></p>
       </footer>
     </div>
   );
@@ -258,7 +272,7 @@ const styles = {
     display: 'flex', 
     flexDirection: 'column', 
     alignItems: 'center', 
-    backgroundColor: '#923636', 
+    backgroundColor: '#fffbeb', // ပန်းအဝါရောင်နဲ့ လိုက်ဖက်တဲ့ Cream အရောင်
     minHeight: '100vh', 
     fontFamily: "'Segoe UI', sans-serif",
     position: 'relative',
@@ -266,60 +280,62 @@ const styles = {
   },
   flowerLeft: {
     position: 'absolute',
-    top: '-20px',
-    left: '-20px',
-    width: '180px',
+    top: '-30px',
+    left: '-5px',
+    width: '200px',
     height: 'auto',
-    zIndex: 10,
-    animation: 'sway 4s ease-in-out infinite',
-    pointerEvents: 'none'
+    zIndex: 1,
+    pointerEvents: 'none',
+    transformOrigin: 'top center'
   },
   flowerRight: {
     position: 'absolute',
-    top: '-20px',
-    right: '-20px',
-    width: '180px',
+    top: '-30px',
+    right: '-5px',
+    width: '200px',
     height: 'auto',
-    zIndex: 10,
-    animation: 'swayReverse 4s ease-in-out infinite',
-    pointerEvents: 'none'
+    zIndex: 1,
+    pointerEvents: 'none',
+    transformOrigin: 'top center'
   },
   floatingAlert: { position: 'fixed', top: '25px', padding: '16px 30px', borderRadius: '50px', color: '#fff', zIndex: 1000, fontWeight: '600', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' },
   success: { backgroundColor: '#10b981' }, 
   warning: { backgroundColor: '#f59e0b' }, 
   error: { backgroundColor: '#ef4444' },
-  header: { textAlign: 'center', marginBottom: '30px' },
-  logoCircle: { width: '80px', height: '80px', borderRadius: '50%', backgroundColor: '#fff', margin: '0 auto 15px', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' },
-  logoImg: { width: '100%', height: 'auto' },
-  mainTitle: { margin: 0, color: '#ffffff', fontSize: '28px', fontWeight: '800' },
-  clockContainer: { marginTop: '15px', padding: '10px', borderRadius: '20px', backgroundColor: '#935555' },
-  realTimeClock: { fontSize: '36px', fontWeight: '700', color: '#3b82f6', letterSpacing: '2px' },
-  realDate: { fontSize: '14px', color: '#5f9bef', fontWeight: '500', marginTop: '5px' },
-  card: { padding: '30px 40px', backgroundColor: '#935555', borderRadius: '28px', width: '100%', maxWidth: '450px', marginBottom: '40px', boxShadow: '0 20px 40px rgba(0,0,0,0.04)', zIndex: 5 },
+  header: { textAlign: 'center', marginBottom: '30px', zIndex: 5 },
+  logoCircle: { width: '85px', height: '85px', borderRadius: '50%', backgroundColor: '#fff', margin: '0 auto 15px', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' },
+  logoImg: { width: '85%', height: 'auto' },
+  mainTitle: { margin: 0, color: '#92400e', fontSize: '30px', fontWeight: '900' },
+  subTitle: { margin: '5px 0 0', color: '#b45309', fontWeight: '600', fontSize: '16px' },
+  clockContainer: { marginTop: '15px', padding: '12px 25px', borderRadius: '25px', backgroundColor: '#fef3c7', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.05)' },
+  realTimeClock: { fontSize: '38px', fontWeight: '800', color: '#d97706', letterSpacing: '1px' },
+  realDate: { fontSize: '14px', color: '#92400e', fontWeight: '500', marginTop: '4px' },
+  card: { padding: '30px 40px', backgroundColor: '#fff', borderRadius: '30px', width: '100%', maxWidth: '450px', marginBottom: '40px', boxShadow: '0 20px 40px rgba(146, 64, 14, 0.1)', zIndex: 5, border: '1px solid #fde68a' },
   inputGroup: { marginBottom: '20px' },
-  label: { display: 'block', marginBottom: '10px', fontSize: '14px', fontWeight: '600', color: '#e2ecf9' },
-  select: { width: '100%', padding: '16px', borderRadius: '16px', border: '2px solid #e2e8f0', fontSize: '16px', outline: 'none' },
-  downloadBtn: { width: '100%', backgroundColor: '#3b82f6', color: '#ffffff', border: 'none', padding: '14px', borderRadius: '14px', cursor: 'pointer', fontWeight: '700', marginBottom: '25px' },
+  label: { display: 'block', marginBottom: '10px', fontSize: '14px', fontWeight: '600', color: '#92400e' },
+  select: { width: '100%', padding: '16px', borderRadius: '18px', border: '2px solid #fde68a', fontSize: '16px', outline: 'none', cursor: 'pointer', backgroundColor: '#fff' },
+  downloadBtn: { width: '100%', backgroundColor: '#fbbf24', color: '#92400e', border: 'none', padding: '14px', borderRadius: '16px', cursor: 'pointer', fontWeight: '700', marginBottom: '25px', boxShadow: '0 4px 6px rgba(251, 191, 36, 0.2)' },
   buttonGroup: { display: 'flex', gap: '15px' },
-  button: { flex: 1, padding: '18px', color: '#ffffff', border: 'none', borderRadius: '16px', cursor: 'pointer', fontWeight: '700' },
-  btnIn: { backgroundColor: '#10b981' }, 
-  btnOut: { backgroundColor: '#f43f5e' },
-  tableCard: { width: '100%', maxWidth: '900px', backgroundColor: '#935555', padding: '30px', borderRadius: '32px', boxShadow: '0 10px 30px rgba(0,0,0,0.02)', marginBottom: '40px', zIndex: 5 },
+  button: { flex: 1, padding: '18px', color: '#fff', border: 'none', borderRadius: '18px', cursor: 'pointer', fontWeight: '700', fontSize: '16px' },
+  btnIn: { backgroundColor: '#059669', boxShadow: '0 4px 12px rgba(5, 150, 105, 0.2)' }, 
+  btnOut: { backgroundColor: '#dc2626', boxShadow: '0 4px 12px rgba(220, 38, 38, 0.2)' },
+  tableCard: { width: '100%', maxWidth: '900px', backgroundColor: '#fff', padding: '30px', borderRadius: '32px', boxShadow: '0 10px 30px rgba(0,0,0,0.03)', marginBottom: '40px', zIndex: 5, border: '1px solid #fef3c7' },
   tableHeaderSection: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px' },
-  tableTitle: { margin: 0, fontSize: '20px', color: '#b3c7e6' },
-  refreshBtn: { border: '1px solid #e2e8f0', background: '#fff', padding: '10px 18px', borderRadius: '12px', cursor: 'pointer', fontWeight: '600' },
+  tableTitle: { margin: 0, fontSize: '20px', color: '#92400e', fontWeight: '700' },
+  refreshBtn: { border: '1px solid #fde68a', background: '#fef3c7', color: '#92400e', padding: '10px 18px', borderRadius: '14px', cursor: 'pointer', fontWeight: '600' },
   tableWrapper: { overflowX: 'auto' },
-  table: { width: '100%', borderCollapse: 'separate', borderSpacing: '0 8px' },
-  th: { textAlign: 'left', padding: '15px', color: '#f3f5f8', fontSize: '12px', textTransform: 'uppercase' },
-  tableRow: { backgroundColor: '#935555' },
-  td: { padding: '18px 15px', color: '#ffffff' },
-  inTime: { color: '#9bd7c4', fontWeight: '700' },
-  outTime: { color: '#e11d48', fontWeight: '700' },
-  durationBadge: { backgroundColor: '#3b82f6', color: '#fff', padding: '6px 12px', borderRadius: '10px', fontSize: '13px', fontWeight: '600' },
-  emptyBadge: { color: '#cbd5e1' },
-  noData: { textAlign: 'center', padding: '50px', color: '#94a3b8' },
-  footer: { marginTop: 'auto', padding: '20px 0', width: '100%', textAlign: 'center' },
-  footerText: { color: '#94a3b8', fontSize: '14px', margin: 0, letterSpacing: '0.5px' }
+  table: { width: '100%', borderCollapse: 'separate', borderSpacing: '0 10px' },
+  th: { textAlign: 'left', padding: '15px', color: '#b45309', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px' },
+  tableRow: { backgroundColor: '#fff9f2', transition: 'transform 0.2s' },
+  td: { padding: '18px 15px', color: '#451a03', borderBottom: '1px solid #fef3c7' },
+  inTime: { color: '#059669', fontWeight: '700' },
+  outTime: { color: '#dc2626', fontWeight: '700' },
+  durationBadge: { backgroundColor: '#fbbf24', color: '#92400e', padding: '6px 14px', borderRadius: '12px', fontSize: '13px', fontWeight: '700' },
+  emptyBadge: { color: '#d1d5db' },
+  noData: { textAlign: 'center', padding: '50px', color: '#b45309', fontStyle: 'italic' },
+  footer: { marginTop: 'auto', padding: '30px 0', width: '100%', textAlign: 'center' },
+  footerText: { color: '#d97706', fontSize: '16px', fontWeight: '600', margin: '0 0 5px' },
+  devText: { color: '#b45309', fontSize: '12px', margin: 0, opacity: 0.8 }
 };
 
 export default App;
