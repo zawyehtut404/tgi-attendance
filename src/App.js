@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import axios from 'axios';
 
-// --- Google Apps Script Configuration ---
-const BASE_URL = "https://script.google.com/macros/s/AKfycbxZ3brn_-Z-TxRR2U9OicQWvRvAlouTs9Dh0UAkdBuPbGuQxYuZ7ddhCBHmhsG9prAU/exec";
+// --- API Configuration ---
+// SheetBest URL ကို Attendance tab အထိ ညွှန်းထားပါ
+const API_URL = "https://api.sheetbest.com/sheets/30473ef1-d688-4651-806e-dcb573467fef/tabs/Attendance";
+const EMP_URL = "https://api.sheetbest.com/sheets/30473ef1-d688-4651-806e-dcb573467fef/tabs/Employees";
 
 function App() {
   const [employeeList, setEmployeeList] = useState([]);
@@ -9,7 +12,6 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [selectedName, setSelectedName] = useState('');
   const [alert, setAlert] = useState({ show: false, message: '', type: '' });
-  
   const [currentTimeDisplay, setCurrentTimeDisplay] = useState(new Date());
 
   // Real-time Clock Effect
@@ -25,21 +27,20 @@ function App() {
     setTimeout(() => setAlert(prev => ({ ...prev, show: false })), 4000);
   }, []);
 
+  // Data Fetching
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const empRes = await fetch(`${BASE_URL}?tab=Employees`);
-      const empData = await empRes.json();
-      setEmployeeList(Array.isArray(empData) ? empData : []);
-
-      const attRes = await fetch(`${BASE_URL}?tab=Attendance`);
-      const attData = await attRes.json();
+      const empRes = await axios.get(EMP_URL);
+      const attRes = await axios.get(API_URL);
       
-      const todayStr = new Date().toLocaleDateString('en-GB');
-      const filtered = Array.isArray(attData) ? attData.filter(r => r.Date === todayStr) : [];
+      setEmployeeList(Array.isArray(empRes.data) ? empRes.data : []);
+      
+      const todayStr = new Date().toLocaleDateString('en-GB'); // DD/MM/YYYY
+      const filtered = Array.isArray(attRes.data) ? attRes.data.filter(r => r.Date === todayStr) : [];
       setSummaryRecords(filtered);
     } catch (err) {
-      showAlert("Data ဆွဲယူ၍ မရပါ (GAS Connection Error)", "error");
+      showAlert("Data ဆွဲယူ၍ မရပါ (API Error)", "error");
     } finally {
       setLoading(false);
     }
@@ -53,7 +54,8 @@ function App() {
     if (!inTime || !outTime) return "-";
     try {
       const parseTime = (timeStr) => {
-        const match = timeStr.match(/(\d+):(\d+)(?::(\d+))?\s*(AM|PM)?/i);
+        const cleanTime = timeStr.replace(/'/g, ""); // အရှေ့က code အရ ' ပါခဲ့ရင် ဖယ်ရန်
+        const match = cleanTime.match(/(\d+):(\d+)(?::(\d+))?\s*(AM|PM)?/i);
         if (!match) return null;
         let hours = parseInt(match[1], 10);
         const minutes = parseInt(match[2], 10);
@@ -87,11 +89,12 @@ function App() {
     const timeForDB = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true });
 
     try {
-      const res = await fetch(`${BASE_URL}?tab=Attendance`);
-      const allRecords = await res.json();
-      const existingRecord = allRecords.find(r => r.Name === selectedName && r.Date === todayStr);
-
-      let payload = { Name: selectedName, Date: todayStr };
+      const checkRes = await axios.get(API_URL);
+      const allRecords = Array.isArray(checkRes.data) ? checkRes.data : [];
+      
+      // ယနေ့အတွက် ဝန်ထမ်းမှတ်တမ်းရှိမရှိ စစ်ဆေးခြင်း
+      const existingIdx = allRecords.findIndex(r => r.Name === selectedName && r.Date === todayStr);
+      const existingRecord = existingIdx !== -1 ? allRecords[existingIdx] : null;
 
       if (actionType === 'ClockIn') {
         if (existingRecord && existingRecord.ClockIn) {
@@ -99,9 +102,7 @@ function App() {
           setLoading(false);
           return;
         }
-        payload.ClockIn = timeForDB;
-        payload.action = "insert";
-      } else {
+      } else { // ClockOut logic
         if (!existingRecord || !existingRecord.ClockIn) {
           showAlert("Clock In အရင်လုပ်ရန် လိုအပ်သည်", "warning");
           setLoading(false);
@@ -112,21 +113,32 @@ function App() {
           setLoading(false);
           return;
         }
-        payload.ClockOut = timeForDB;
-        payload.Duration = calculateDuration(existingRecord.ClockIn, timeForDB);
-        payload.action = "update";
       }
 
-      await fetch(BASE_URL, {
-        method: 'POST',
-        mode: 'no-cors',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      if (existingIdx !== -1) {
+        // Update existing record
+        let updateData = {};
+        if (actionType === 'ClockOut') {
+          const duration = calculateDuration(existingRecord.ClockIn, timeForDB);
+          updateData = { ClockOut: `'${timeForDB}`, Duration: `'${duration}` };
+        } else {
+          updateData = { ClockIn: `'${timeForDB}` };
+        }
+        await axios.patch(`${API_URL}/${existingIdx}`, updateData);
+      } else {
+        // Insert new record
+        await axios.post(API_URL, {
+          Name: selectedName, 
+          Date: `'${todayStr}`,
+          ClockIn: actionType === 'ClockIn' ? `'${timeForDB}` : '',
+          ClockOut: actionType === 'ClockOut' ? `'${timeForDB}` : '',
+          Duration: ''
+        });
+      }
 
       showAlert(`${selectedName} ${actionType === 'ClockIn' ? 'အလုပ်ဝင်ခြင်း' : 'အလုပ်ဆင်းခြင်း'} အောင်မြင်ပါသည်`, "success");
       setSelectedName('');
-      setTimeout(() => fetchData(), 2000);
+      setTimeout(() => fetchData(), 1000);
     } catch (error) {
       showAlert("ချိတ်ဆက်မှု အမှားအယွင်းရှိပါသည်", "error");
     } finally {
@@ -137,7 +149,7 @@ function App() {
   const downloadPersonalCSV = () => {
     if (!selectedName) { showAlert("ဝန်ထမ်းအမည် အရင်ရွေးချယ်ပါ", "warning"); return; }
     const personalRecord = summaryRecords.find(r => r.Name === selectedName);
-    if (!personalRecord) { showAlert("မှတ်တမ်းမရှိသေးပါ", "warning"); return; }
+    if (!personalRecord) { showAlert("ယနေ့အတွက် မှတ်တမ်းမရှိသေးပါ", "warning"); return; }
     const headers = ["Name", "Date", "Clock In", "Clock Out", "Duration"];
     const row = [`"${personalRecord.Name}"`, `"${personalRecord.Date}"`, `"${personalRecord.ClockIn || '-'}"`, `"${personalRecord.ClockOut || '-'}"`, `"${personalRecord.Duration || '-'}"`];
     const csvContent = [headers.join(","), row.join(",")].join("\n");
@@ -166,8 +178,8 @@ function App() {
         .alert-box { animation: fadeInDown 0.4s ease-out; }
         .flower-sway { animation: sway 5s ease-in-out infinite; }
         .flower-sway-reverse { animation: swayReverse 5s ease-in-out infinite; }
-        button:hover { filter: brightness(1.1); transform: scale(1.02); transition: all 0.2s; }
-        button:active { transform: scale(0.98); }
+        button:hover:not(:disabled) { filter: brightness(1.1); transform: scale(1.02); transition: all 0.2s; }
+        button:active:not(:disabled) { transform: scale(0.98); }
       `}</style>
 
       {/* သင်္ကြန်ပွဲတော် အလှဆင် ပိတောက်ပန်းများ */}
@@ -195,7 +207,7 @@ function App() {
           <img src="https://i.ibb.co/Gvb5m1p5/0b2cb75f-e9f1-43c1-aa40-4ea1b7b522f5-removebg-preview.png" alt="TGI Logo" style={styles.logoImg} />
         </div>
         <h1 style={styles.mainTitle}>TGI Attendance System</h1>
-        <p style={styles.subTitle}>𝐓𝐡𝐢𝐧𝐠𝐲𝐚𝐧 𝐅𝐞𝐬𝐭𝐢𝐯𝐚𝐥 𝐄𝐝𝐢𝐭𝐢𝐨𝐧 💦</p>
+        <p style={styles.subTitle}>𝑻𝒉𝒊𝒏𝒈𝒚𝒂𝒏 𝑭𝒆𝒔𝒕𝒊𝒗𝒂𝒍 𝑬𝒅𝒊𝒕𝒊𝒐𝒏 💦</p>
         
         <div style={styles.clockContainer}>
           <div style={styles.realTimeClock}>
@@ -260,6 +272,7 @@ function App() {
 
       <footer style={styles.footer}>
         <p style={styles.footerText}>Wishing you a happy Thingyan! 💦</p>
+        <p style={styles.copytighttext}>© 2026 TGI Japanese Language School. All rights reserved.</p>
         <p style={styles.devText}>Dev by <strong>Htut</strong></p>
       </footer>
     </div>
@@ -272,7 +285,7 @@ const styles = {
     display: 'flex', 
     flexDirection: 'column', 
     alignItems: 'center', 
-    backgroundColor: '#fffbeb', // ပန်းအဝါရောင်နဲ့ လိုက်ဖက်တဲ့ Cream အရောင်
+    backgroundColor: '#fffbeb', 
     minHeight: '100vh', 
     fontFamily: "'Segoe UI', sans-serif",
     position: 'relative',
@@ -318,7 +331,7 @@ const styles = {
   buttonGroup: { display: 'flex', gap: '15px' },
   button: { flex: 1, padding: '18px', color: '#fff', border: 'none', borderRadius: '18px', cursor: 'pointer', fontWeight: '700', fontSize: '16px' },
   btnIn: { backgroundColor: '#059669', boxShadow: '0 4px 12px rgba(5, 150, 105, 0.2)' }, 
-  btnOut: { backgroundColor: '#451a03', boxShadow: '0 4px 12px rgba(220, 38, 38, 0.2)' },
+  btnOut: { backgroundColor: '#b45309', boxShadow: '0 4px 12px rgba(220, 38, 38, 0.2)' },
   tableCard: { width: '100%', maxWidth: '900px', backgroundColor: '#fff', padding: '30px', borderRadius: '32px', boxShadow: '0 10px 30px rgba(0,0,0,0.03)', marginBottom: '40px', zIndex: 5, border: '1px solid #fef3c7' },
   tableHeaderSection: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px' },
   tableTitle: { margin: 0, fontSize: '20px', color: '#92400e', fontWeight: '700' },
@@ -335,7 +348,8 @@ const styles = {
   noData: { textAlign: 'center', padding: '50px', color: '#b45309', fontStyle: 'italic' },
   footer: { marginTop: 'auto', padding: '30px 0', width: '100%', textAlign: 'center' },
   footerText: { color: '#d97706', fontSize: '16px', fontWeight: '600', margin: '0 0 5px' },
-  devText: { color: '#b45309', fontSize: '12px', margin: 0, opacity: 0.8 }
+  copytighttext: { color: '#b45309', fontSize: '12px' , fontWeight: '500', margin: '0 0 5px' },
+  devText: { color: '#b45309', fontSize: '14px', margin: 0, opacity: 0.8 }
 };
 
 export default App;
