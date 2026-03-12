@@ -3,8 +3,8 @@ import axios from 'axios';
 
 // --- API Configuration ---
 // SheetBest URL ကို Attendance tab အထိ ညွှန်းထားပါ
-const API_URL = "https://api.sheetbest.com/sheets/30473ef1-d688-4651-806e-dcb573467fef/tabs/Attendance";
-const EMP_URL = "https://api.sheetbest.com/sheets/30473ef1-d688-4651-806e-dcb573467fef/tabs/Employees";
+const API_URL = "https://api.sheetbest.com/sheets/1a6bff99-6da6-4f73-8ac1-ad0546a6a21c/tabs/Attendance";
+const EMP_URL = "https://api.sheetbest.com/sheets/1a6bff99-6da6-4f73-8ac1-ad0546a6a21c/tabs/Employees";
 
 function App() {
   const [employeeList, setEmployeeList] = useState([]);
