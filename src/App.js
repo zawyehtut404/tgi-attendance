@@ -125,11 +125,11 @@ function App() {
       const outDate = parseTime(outTime);
       if (!inDate || !outDate) return "-";
 
-      // 9:00 AM Cutoff for duration start
+      // 9:01 AM Cutoff for duration start
       const cutoffDate = new Date(inDate);
-      cutoffDate.setHours(9, 0, 0, 0);
+      cutoffDate.setHours(9, 1, 0, 0);
 
-      // စောရောက်ရင် ၉ နာရီကနေစတွက်မယ်၊ နောက်ကျရင် ရောက်တဲ့အချိန်ကနေ တွက်မယ်
+      // စောရောက်ရင် ၉ နာရီ ၀၁ မိနစ်ကနေစတွက်မယ်၊ နောက်ကျရင် ရောက်တဲ့အချိန်ကနေ တွက်မယ်
       const effectiveStartDate = inDate < cutoffDate ? cutoffDate : inDate;
       const startTime = effectiveStartDate.getTime();
       const endTime = outDate.getTime();
@@ -178,15 +178,24 @@ function App() {
         } else if (record.type === 'update') {
           const checkRes = await axios.get(API_URL);
           const allRecords = Array.isArray(checkRes.data) ? checkRes.data : [];
-          const idx = allRecords.findIndex(r => r.Name === record.data.Name && r.Date === record.data.Date);
+          const idx = allRecords.findIndex(r => {
+            const rowName = r.Name ? r.Name.toString().trim() : "";
+            const rowDate = r.Date ? r.Date.toString().replace(/'/g, "").trim() : "";
+            const searchName = record.data.Name ? record.data.Name.toString().trim() : "";
+            const searchDate = record.data.Date ? record.data.Date.toString().replace(/'/g, "").trim() : "";
+            return rowName === searchName && rowDate === searchDate;
+          });
           if (idx !== -1) {
             await axios.patch(`${API_URL}/${idx}`, record.updateData);
-            // Sync ပြီးရင် Notification ပို့မယ်
             const cleanTime = record.updateData.ClockOut.replace(/'/g, "");
             sendTelegramNotification(record.data.Name, 'ClockOut', cleanTime);
+          } else {
+            // Find မတွေ့ရင် skip မလုပ်ဘဲ failedIndices ထဲထည့်ထားမယ် (Data မပျောက်အောင်)
+            failedIndices.push(i);
           }
         }
       } catch (e) {
+        console.error("Sync error for item", i, e);
         failedIndices.push(i);
       }
     }
@@ -216,9 +225,9 @@ function App() {
     const todayStr = now.toLocaleDateString('en-GB');
     const timeForDB = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true });
 
-    // 9:00 AM Cutoff for Late marking
+    // 9:01 AM Cutoff for Late marking and duration start
     const cutoff = new Date(now);
-    cutoff.setHours(9, 0, 0, 0);
+    cutoff.setHours(9, 1, 0, 0);
     const isLateStatus = now > cutoff ? 'Late' : 'On Time';
 
     // Handle Offline Case
@@ -296,7 +305,13 @@ function App() {
       const checkRes = await axios.get(API_URL);
       const allRecords = Array.isArray(checkRes.data) ? checkRes.data : [];
 
-      const existingIdx = allRecords.findIndex(r => r.Name === selectedName && r.Date === todayStr);
+      const existingIdx = allRecords.findIndex(r => {
+        const rowName = r.Name ? r.Name.toString().trim() : "";
+        const rowDate = r.Date ? r.Date.toString().replace(/'/g, "").trim() : "";
+        const searchName = selectedName.toString().trim();
+        const searchDate = todayStr.toString().trim();
+        return rowName === searchName && rowDate === searchDate;
+      });
       const existingRecord = existingIdx !== -1 ? allRecords[existingIdx] : null;
 
       if (actionType === 'ClockIn') {
