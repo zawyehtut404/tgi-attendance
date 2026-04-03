@@ -82,16 +82,27 @@ function App() {
       localStorage.setItem('attendance_summary', JSON.stringify(filtered));
     } catch (err) {
       // Load from cache if API fails
+      const todayStr = new Date().toLocaleDateString('en-GB');
       const cachedEmps = localStorage.getItem('attendance_employees');
       const cachedSummary = localStorage.getItem('attendance_summary');
 
       if (cachedEmps) setEmployeeList(JSON.parse(cachedEmps));
-      if (cachedSummary) setSummaryRecords(JSON.parse(cachedSummary));
+      
+      // Cache ထဲက data ဖြစ်ဖြစ် ရောက်လာတဲ့ data ဖြစ်ဖြစ် ဒီနေ့အတွက်ပဲ filter လုပ်မယ်
+      if (cachedSummary) {
+        const parsed = JSON.parse(cachedSummary);
+        const filtered = parsed.filter(r => {
+          const rowDate = r.Date ? r.Date.toString().replace(/'/g, "").trim() : "";
+          return rowDate === todayStr;
+        });
+        setSummaryRecords(filtered);
+      }
 
       if (!navigator.onLine) {
         showAlert("Offline Mode - Local data ကို ပြသနေပါသည်", "warning");
       } else {
-        showAlert("Data ဆွဲယူ၍ မရပါ (Server Error)", "error");
+        // 404 Error (Missing tab) ဆိုရင် Offline အတိုင်း အလုပ်လုပ်နိုင်ဖို့ warning ပေးမယ်
+        showAlert("Server နှင့် ချိတ်ဆက်မရပါ (Offline အတိုင်း ဆက်လက်သုံးစွဲနိုင်ပြီး WiFi ပြန်ရလာလျှင် Sync လုပ်ပေးပါမည်)", "warning");
       }
     } finally {
       setLoading(false);
@@ -230,15 +241,13 @@ function App() {
     cutoff.setHours(9, 1, 0, 0);
     const isLateStatus = now > cutoff ? 'Late' : 'On Time';
 
-    // Handle Offline Case
-    if (!isOnline) {
+    const saveOffline = () => {
       const offlineRecord = {
         type: '',
         data: { Name: selectedName, Date: `'${todayStr}` },
         timestamp: now.getTime()
       };
 
-      // ယနေ့အတွက် local records ထဲမှာ ရှိမရှိအရင်ကြည့်
       const existingInSummary = summaryRecords.find(r => r.Name === selectedName);
 
       if (actionType === 'ClockIn') {
@@ -274,7 +283,6 @@ function App() {
       setOfflineQueue(newQueue);
       localStorage.setItem('attendance_offline_queue', JSON.stringify(newQueue));
 
-      // UI Update summary immediately for better feedback
       const updatedSummary = [...summaryRecords];
       const sIdx = updatedSummary.findIndex(r => r.Name === selectedName);
       if (sIdx !== -1) {
@@ -295,9 +303,14 @@ function App() {
       setSummaryRecords(updatedSummary);
       localStorage.setItem('attendance_summary', JSON.stringify(updatedSummary));
 
-      showAlert(`${selectedName} ${actionType === 'ClockIn' ? 'အလုပ်ဝင်ခြင်း' : 'အလုပ်ဆင်းခြင်း'} ကို Local မှာ မှတ်သားထားပါသည် (WiFi ပြန်လာလျှင် Sync လုပ်ပေးပါမည်)`, "warning");
+      showAlert(`${selectedName} ကို Local မှာ မှတ်သားထားပါသည် (WiFi ပြန်ကောင်းလာလျှင် Auto Sync လုပ်ပေးပါမည်)`, "warning");
       setSelectedName('');
       setLoading(false);
+    };
+
+    // Handle Offline Case or API Failure
+    if (!isOnline) {
+      saveOffline();
       return;
     }
 
@@ -361,7 +374,8 @@ function App() {
       setSelectedName('');
       setTimeout(() => fetchData(), 1000);
     } catch (error) {
-      showAlert("ချိတ်ဆက်မှု အမှားအယွင်းရှိပါသည်", "error");
+      // API Error ဖြစ်ရင် (ဥပမာ 404 Tab Missing) Offline အတိုင်း ပဲ သိမ်းမယ်
+      saveOffline();
     } finally {
       setLoading(false);
     }
