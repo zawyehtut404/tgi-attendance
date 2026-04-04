@@ -20,6 +20,16 @@ self.addEventListener('install', event => {
 
 // Cache and return requests
 self.addEventListener('fetch', event => {
+    // For navigation requests (like index.html), use Network First strategy
+    if (event.request.mode === 'navigate') {
+        event.respondWith(
+            fetch(event.request).catch(() => {
+                return caches.match('/index.html');
+            })
+        );
+        return;
+    }
+
     event.respondWith(
         caches.match(event.request)
             .then(response => {
@@ -28,8 +38,7 @@ self.addEventListener('fetch', event => {
                     return response;
                 }
                 return fetch(event.request);
-            }
-            )
+            })
     );
 });
 
