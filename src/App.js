@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
 
 // --- API Configuration ---
-const BASE_URL = "https://api.sheetbest.com/sheets/97b6ac6e-38f0-46b4-a632-c2ab80e30076/tabs";
-const EMP_URL = `${BASE_URL}/Employees`;
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyAKwvv-Z_3oMV5Flv6ADIv3d-hpkfPkadmYtnB40JeNLrsWBRw3tV8-MmcGSpMW3Rw/exec";
 
 const getTabName = () => {
   const now = new Date();
@@ -19,11 +18,11 @@ const getTabName = () => {
   return months[monthIdx];
 };
 
-const API_URL = `${BASE_URL}/${getTabName()}`;
-
-// --- Telegram Configuration ---
-const TG_TOKEN = "8604314854:AAHRea2Dju4HCIljT3YsOEBQB8yRQ01XLEg";
-const TG_CHAT_ID = "01874951487";
+const ATTENDANCE_TAB = getTabName();
+const EMPLOYEE_CACHE_KEY = 'attendance_employees';
+const SUMMARY_CACHE_KEY = 'attendance_summary';
+const CACHE_META_KEY = 'attendance_cache_meta';
+const FETCH_TTL_MS = 5 * 60 * 1000;
 
 function App() {
   const [employeeList, setEmployeeList] = useState([]);
@@ -40,6 +39,79 @@ function App() {
     return saved ? JSON.parse(saved) : [];
   });
   const [isSyncing, setIsSyncing] = useState(false);
+  const hasFetchedOnMount = useRef(false);
+  const syncInFlightRef = useRef(false);
+
+  const getTodayString = () => new Date().toLocaleDateString('en-GB');
+
+  const postToScript = useCallback(async (payload) => {
+    const response = await axios.post(SCRIPT_URL, JSON.stringify(payload), {
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8'
+      },
+      timeout: 15000
+    });
+
+    if (response.data && response.data.ok === false) {
+      throw new Error(response.data.error || 'Apps Script request failed');
+    }
+
+    return response.data;
+  }, []);
+
+  const fetchSheetRows = useCallback(async (tabName) => {
+    const response = await axios.get(SCRIPT_URL, {
+      params: { tab: tabName },
+      timeout: 15000
+    });
+    if (response.data && response.data.ok === false) {
+      throw new Error(response.data.error || 'Apps Script fetch failed');
+    }
+    return Array.isArray(response.data?.data) ? response.data.data : [];
+  }, []);
+
+  const appendSheetRow = useCallback(async (tabName, record) => {
+    return postToScript({
+      action: 'append',
+      tab: tabName,
+      record
+    });
+  }, [postToScript]);
+
+  const updateSheetRowByMatch = useCallback(async (tabName, match, updateData) => {
+    return postToScript({
+      action: 'updateByMatch',
+      tab: tabName,
+      match,
+      updateData
+    });
+  }, [postToScript]);
+
+  const sendTelegramMessage = useCallback(async (message) => {
+    return postToScript({
+      action: 'sendTelegram',
+      message
+    });
+  }, [postToScript]);
+
+  const loadCachedData = useCallback(() => {
+    const todayStr = getTodayString();
+    const cachedEmps = localStorage.getItem(EMPLOYEE_CACHE_KEY);
+    const cachedSummary = localStorage.getItem(SUMMARY_CACHE_KEY);
+
+    if (cachedEmps) {
+      setEmployeeList(JSON.parse(cachedEmps));
+    }
+
+    if (cachedSummary) {
+      const parsed = JSON.parse(cachedSummary);
+      const filtered = parsed.filter(r => {
+        const rowDate = r.Date ? r.Date.toString().replace(/'/g, "").trim() : "";
+        return rowDate === todayStr;
+      });
+      setSummaryRecords(filtered);
+    }
+  }, []);
 
   // Real-time Clock Effect
   useEffect(() => {
@@ -66,37 +138,40 @@ function App() {
   }, []);
 
   // Data Fetching
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (forceRefresh = false) => {
+    const todayStr = getTodayString();
+    const cacheMeta = localStorage.getItem(CACHE_META_KEY);
+
+    if (!forceRefresh && cacheMeta) {
+      try {
+        const parsedMeta = JSON.parse(cacheMeta);
+        const isFresh = parsedMeta.fetchedAt && (Date.now() - parsedMeta.fetchedAt < FETCH_TTL_MS);
+        if (isFresh) {
+          loadCachedData();
+          return;
+        }
+      } catch (e) {
+        console.error("Cache meta parse error:", e);
+      }
+    }
+
     setLoading(true);
     try {
-      const empRes = await axios.get(EMP_URL);
-      const attRes = await axios.get(API_URL);
+      const employees = await fetchSheetRows('Employees');
+      const attendanceRows = await fetchSheetRows(ATTENDANCE_TAB);
 
-      const employees = Array.isArray(empRes.data) ? empRes.data : [];
       setEmployeeList(employees);
-      localStorage.setItem('attendance_employees', JSON.stringify(employees));
+      localStorage.setItem(EMPLOYEE_CACHE_KEY, JSON.stringify(employees));
 
-      const todayStr = new Date().toLocaleDateString('en-GB'); // DD/MM/YYYY
-      const filtered = Array.isArray(attRes.data) ? attRes.data.filter(r => r.Date === todayStr) : [];
+      const filtered = attendanceRows.filter(r => r.Date === todayStr);
       setSummaryRecords(filtered);
-      localStorage.setItem('attendance_summary', JSON.stringify(filtered));
+      localStorage.setItem(SUMMARY_CACHE_KEY, JSON.stringify(filtered));
+      localStorage.setItem(CACHE_META_KEY, JSON.stringify({ fetchedAt: Date.now() }));
     } catch (err) {
       // Load from cache if API fails
-      const todayStr = new Date().toLocaleDateString('en-GB');
-      const cachedEmps = localStorage.getItem('attendance_employees');
-      const cachedSummary = localStorage.getItem('attendance_summary');
-
-      if (cachedEmps) setEmployeeList(JSON.parse(cachedEmps));
+      loadCachedData();
       
       // Cache ထဲက data ဖြစ်ဖြစ် ရောက်လာတဲ့ data ဖြစ်ဖြစ် ဒီနေ့အတွက်ပဲ filter လုပ်မယ်
-      if (cachedSummary) {
-        const parsed = JSON.parse(cachedSummary);
-        const filtered = parsed.filter(r => {
-          const rowDate = r.Date ? r.Date.toString().replace(/'/g, "").trim() : "";
-          return rowDate === todayStr;
-        });
-        setSummaryRecords(filtered);
-      }
 
       if (!navigator.onLine) {
         showAlert("Offline Mode - Local data ကို ပြသနေပါသည်", "warning");
@@ -107,9 +182,14 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }, [showAlert]);
+  }, [fetchSheetRows, loadCachedData, showAlert]);
 
   useEffect(() => {
+    if (hasFetchedOnMount.current) {
+      return;
+    }
+
+    hasFetchedOnMount.current = true;
     fetchData();
   }, [fetchData]);
 
@@ -154,42 +234,46 @@ function App() {
     } catch (e) { return "-"; }
   };
 
-  const sendTelegramNotification = async (name, action, time, status = "") => {
+  const sendTelegramNotification = useCallback(async (name, action, time, status = "") => {
     try {
       let message = `⏰ ${name} - ${action === 'ClockIn' ? 'Clock In လုပ်လိုက်ပါပြီ' : 'Clock Out လုပ်လိုက်ပါပြီ'}\n`;
       message += `🕒 အချိန်: ${time}\n`;
       if (status) message += `📝 Status: ${status}`;
-
-      const url = `https://api.telegram.org/bot${TG_TOKEN}/sendMessage`;
-      await axios.post(url, {
-        chat_id: TG_CHAT_ID,
-        text: message
-      });
+      await sendTelegramMessage(message);
     } catch (error) {
       console.error("Telegram error:", error);
     }
-  };
+  }, [sendTelegramMessage]);
 
   // --- Sync Offline Data ---
   const syncOfflineRecords = useCallback(async () => {
-    if (offlineQueue.length === 0 || isSyncing || !navigator.onLine) return;
+    if (offlineQueue.length === 0 || isSyncing || !navigator.onLine || syncInFlightRef.current) return;
 
+    syncInFlightRef.current = true;
     setIsSyncing(true);
-    const queue = [...offlineQueue];
-    const failedIndices = [];
+    try {
+      const queue = [...offlineQueue];
+      const failedIndices = [];
+      let remoteRecords = [];
+
+    if (queue.some(record => record.type === 'update')) {
+      try {
+        remoteRecords = await fetchSheetRows(ATTENDANCE_TAB);
+      } catch (e) {
+        console.error("Sync preload error:", e);
+      }
+    }
 
     for (let i = 0; i < queue.length; i++) {
       const record = queue[i];
       try {
         if (record.type === 'new') {
-          await axios.post(API_URL, record.data);
+          await appendSheetRow(ATTENDANCE_TAB, record.data);
           // Sync ပြီးရင် Notification ပို့မယ်
           const cleanTime = record.data.ClockIn.replace(/'/g, "");
-          sendTelegramNotification(record.data.Name, 'ClockIn', cleanTime, record.data.Status);
+          await sendTelegramNotification(record.data.Name, 'ClockIn', cleanTime, record.data.Status);
         } else if (record.type === 'update') {
-          const checkRes = await axios.get(API_URL);
-          const allRecords = Array.isArray(checkRes.data) ? checkRes.data : [];
-          const idx = allRecords.findIndex(r => {
+          const idx = remoteRecords.findIndex(r => {
             const rowName = r.Name ? r.Name.toString().trim() : "";
             const rowDate = r.Date ? r.Date.toString().replace(/'/g, "").trim() : "";
             const searchName = record.data.Name ? record.data.Name.toString().trim() : "";
@@ -197,9 +281,12 @@ function App() {
             return rowName === searchName && rowDate === searchDate;
           });
           if (idx !== -1) {
-            await axios.patch(`${API_URL}/${idx}`, record.updateData);
+            await updateSheetRowByMatch(ATTENDANCE_TAB, {
+              Name: record.data.Name,
+              Date: record.data.Date
+            }, record.updateData);
             const cleanTime = record.updateData.ClockOut.replace(/'/g, "");
-            sendTelegramNotification(record.data.Name, 'ClockOut', cleanTime);
+            await sendTelegramNotification(record.data.Name, 'ClockOut', cleanTime);
           } else {
             // Find မတွေ့ရင် skip မလုပ်ဘဲ failedIndices ထဲထည့်ထားမယ် (Data မပျောက်အောင်)
             failedIndices.push(i);
@@ -214,13 +301,19 @@ function App() {
     const newQueue = failedIndices.map(idx => queue[idx]);
     setOfflineQueue(newQueue);
     localStorage.setItem('attendance_offline_queue', JSON.stringify(newQueue));
-    setIsSyncing(false);
+    
 
     if (failedIndices.length === 0) {
       showAlert("Offline မှတ်တမ်းအားလုံး Sync လုပ်ပြီးပါပြီ", "success");
-      fetchData();
+      fetchData(true);
+    } else {
+      showAlert(`Sync မပြီးသေးပါ။ Pending ${failedIndices.length} ခု ကျန်နေပါတယ်`, "warning");
     }
-  }, [offlineQueue, isSyncing, fetchData, showAlert]);
+    } finally {
+      setIsSyncing(false);
+      syncInFlightRef.current = false;
+    }
+  }, [appendSheetRow, fetchData, fetchSheetRows, isSyncing, offlineQueue, sendTelegramNotification, showAlert, updateSheetRowByMatch]);
 
   useEffect(() => {
     if (isOnline) {
@@ -240,55 +333,25 @@ function App() {
     const cutoff = new Date(now);
     cutoff.setHours(9, 1, 0, 0);
     const isLateStatus = now > cutoff ? 'Late' : 'On Time';
+    const existingSummaryRecord = summaryRecords.find(r => r.Name === selectedName);
 
-    const saveOffline = () => {
-      const offlineRecord = {
-        type: '',
-        data: { Name: selectedName, Date: `'${todayStr}` },
-        timestamp: now.getTime()
-      };
-
-      const existingInSummary = summaryRecords.find(r => r.Name === selectedName);
-
-      if (actionType === 'ClockIn') {
-        if (existingInSummary && existingInSummary.ClockIn) {
-          showAlert(`${selectedName} သည် ယနေ့အတွက် Clock In လုပ်ပြီးပါပြီ`, "warning");
-          setLoading(false);
-          return;
-        }
-        offlineRecord.type = 'new';
-        offlineRecord.data.ClockIn = `'${timeForDB}`;
-        offlineRecord.data.ClockOut = '';
-        offlineRecord.data.Duration = '';
-        offlineRecord.data.Status = isLateStatus;
-      } else { // ClockOut
-        if (!existingInSummary || !existingInSummary.ClockIn) {
-          showAlert("Clock In အရင်လုပ်ရန် လိုအပ်သည်", "warning");
-          setLoading(false);
-          return;
-        }
-        if (existingInSummary.ClockOut) {
-          showAlert("ယနေ့အတွက် Clock Out လုပ်ပြီးပါပြီ", "warning");
-          setLoading(false);
-          return;
-        }
-        offlineRecord.type = 'update';
-        const duration = calculateDuration(existingInSummary.ClockIn, timeForDB);
-        offlineRecord.updateData = { ClockOut: `'${timeForDB}`, Duration: `'${duration}` };
-        offlineRecord.data.Name = selectedName;
-        offlineRecord.data.Date = `'${todayStr}`;
-      }
-
-      const newQueue = [...offlineQueue, offlineRecord];
-      setOfflineQueue(newQueue);
-      localStorage.setItem('attendance_offline_queue', JSON.stringify(newQueue));
-
+    const updateSummaryImmediately = () => {
       const updatedSummary = [...summaryRecords];
-      const sIdx = updatedSummary.findIndex(r => r.Name === selectedName);
-      if (sIdx !== -1) {
-        if (actionType === 'ClockOut') {
-          updatedSummary[sIdx].ClockOut = timeForDB;
-          updatedSummary[sIdx].Duration = calculateDuration(updatedSummary[sIdx].ClockIn, timeForDB);
+      const summaryIdx = updatedSummary.findIndex(r => r.Name === selectedName);
+
+      if (summaryIdx !== -1) {
+        if (actionType === 'ClockIn') {
+          updatedSummary[summaryIdx] = {
+            ...updatedSummary[summaryIdx],
+            ClockIn: timeForDB,
+            Status: isLateStatus
+          };
+        } else {
+          updatedSummary[summaryIdx] = {
+            ...updatedSummary[summaryIdx],
+            ClockOut: timeForDB,
+            Duration: calculateDuration(updatedSummary[summaryIdx].ClockIn, timeForDB)
+          };
         }
       } else {
         updatedSummary.push({
@@ -300,8 +363,53 @@ function App() {
           Status: isLateStatus
         });
       }
+
       setSummaryRecords(updatedSummary);
-      localStorage.setItem('attendance_summary', JSON.stringify(updatedSummary));
+      localStorage.setItem(SUMMARY_CACHE_KEY, JSON.stringify(updatedSummary));
+      localStorage.setItem(CACHE_META_KEY, JSON.stringify({ fetchedAt: Date.now() }));
+    };
+
+    const saveOffline = () => {
+      const offlineRecord = {
+        type: '',
+        data: { Name: selectedName, Date: `'${todayStr}` },
+        timestamp: now.getTime()
+      };
+
+      if (actionType === 'ClockIn') {
+        if (existingSummaryRecord && existingSummaryRecord.ClockIn) {
+          showAlert(`${selectedName} သည် ယနေ့အတွက် Clock In လုပ်ပြီးပါပြီ`, "warning");
+          setLoading(false);
+          return;
+        }
+        offlineRecord.type = 'new';
+        offlineRecord.data.ClockIn = `'${timeForDB}`;
+        offlineRecord.data.ClockOut = '';
+        offlineRecord.data.Duration = '';
+        offlineRecord.data.Status = isLateStatus;
+      } else { // ClockOut
+        if (!existingSummaryRecord || !existingSummaryRecord.ClockIn) {
+          showAlert("Clock In အရင်လုပ်ရန် လိုအပ်သည်", "warning");
+          setLoading(false);
+          return;
+        }
+        if (existingSummaryRecord.ClockOut) {
+          showAlert("ယနေ့အတွက် Clock Out လုပ်ပြီးပါပြီ", "warning");
+          setLoading(false);
+          return;
+        }
+        offlineRecord.type = 'update';
+        const duration = calculateDuration(existingSummaryRecord.ClockIn, timeForDB);
+        offlineRecord.updateData = { ClockOut: `'${timeForDB}`, Duration: `'${duration}` };
+        offlineRecord.data.Name = selectedName;
+        offlineRecord.data.Date = `'${todayStr}`;
+      }
+
+      const newQueue = [...offlineQueue, offlineRecord];
+      setOfflineQueue(newQueue);
+      localStorage.setItem('attendance_offline_queue', JSON.stringify(newQueue));
+
+      updateSummaryImmediately();
 
       showAlert(`${selectedName} ကို Local မှာ မှတ်သားထားပါသည် (WiFi ပြန်ကောင်းလာလျှင် Auto Sync လုပ်ပေးပါမည်)`, "warning");
       setSelectedName('');
@@ -315,48 +423,39 @@ function App() {
     }
 
     try {
-      const checkRes = await axios.get(API_URL);
-      const allRecords = Array.isArray(checkRes.data) ? checkRes.data : [];
-
-      const existingIdx = allRecords.findIndex(r => {
-        const rowName = r.Name ? r.Name.toString().trim() : "";
-        const rowDate = r.Date ? r.Date.toString().replace(/'/g, "").trim() : "";
-        const searchName = selectedName.toString().trim();
-        const searchDate = todayStr.toString().trim();
-        return rowName === searchName && rowDate === searchDate;
-      });
-      const existingRecord = existingIdx !== -1 ? allRecords[existingIdx] : null;
-
       if (actionType === 'ClockIn') {
-        if (existingRecord && existingRecord.ClockIn) {
+        if (existingSummaryRecord && existingSummaryRecord.ClockIn) {
           showAlert(`${selectedName} သည် ယနေ့အတွက် Clock In လုပ်ပြီးပါပြီ`, "warning");
           setLoading(false);
           return;
         }
       } else {
-        if (!existingRecord || !existingRecord.ClockIn) {
+        if (!existingSummaryRecord || !existingSummaryRecord.ClockIn) {
           showAlert("Clock In အရင်လုပ်ရန် လိုအပ်သည်", "warning");
           setLoading(false);
           return;
         }
-        if (existingRecord.ClockOut) {
+        if (existingSummaryRecord && existingSummaryRecord.ClockOut) {
           showAlert("ယနေ့အတွက် Clock Out လုပ်ပြီးပါပြီ", "warning");
           setLoading(false);
           return;
         }
       }
 
-      if (existingIdx !== -1) {
+      if (existingSummaryRecord) {
         let updateData = {};
         if (actionType === 'ClockOut') {
-          const duration = calculateDuration(existingRecord.ClockIn, timeForDB);
+          const duration = calculateDuration(existingSummaryRecord.ClockIn, timeForDB);
           updateData = { ClockOut: `'${timeForDB}`, Duration: `'${duration}` };
         } else {
           updateData = { ClockIn: `'${timeForDB}`, Status: isLateStatus };
         }
-        await axios.patch(`${API_URL}/${existingIdx}`, updateData);
+        await updateSheetRowByMatch(ATTENDANCE_TAB, {
+          Name: selectedName,
+          Date: `'${todayStr}`
+        }, updateData);
       } else {
-        await axios.post(API_URL, {
+        await appendSheetRow(ATTENDANCE_TAB, {
           Name: selectedName,
           Date: `'${todayStr}`,
           ClockIn: actionType === 'ClockIn' ? `'${timeForDB}` : '',
@@ -368,11 +467,15 @@ function App() {
 
       showAlert(`${selectedName} ${actionType === 'ClockIn' ? 'အလုပ်ဝင်ခြင်း' : 'အလုပ်ဆင်းခြင်း'} အောင်မြင်ပါသည်`, "success");
 
+      updateSummaryImmediately();
+
       // Telegram Notification
-      sendTelegramNotification(selectedName, actionType, timeForDB, actionType === 'ClockIn' ? isLateStatus : '');
+      sendTelegramNotification(selectedName, actionType, timeForDB, actionType === 'ClockIn' ? isLateStatus : '').catch(error => {
+        console.error("Telegram notification failed:", error);
+      });
 
       setSelectedName('');
-      setTimeout(() => fetchData(), 1000);
+      setTimeout(() => fetchData(true), 200);
     } catch (error) {
       // API Error ဖြစ်ရင် (ဥပမာ 404 Tab Missing) Offline အတိုင်း ပဲ သိမ်းမယ်
       saveOffline();
@@ -490,7 +593,7 @@ function App() {
       <div style={styles.tableCard}>
         <div style={styles.tableHeaderSection}>
           <h3 style={styles.tableTitle}>ယနေ့မှတ်တမ်း (Daily Summary)</h3>
-          <button onClick={fetchData} style={styles.refreshBtn} disabled={loading}>🔄 Refresh</button>
+          <button onClick={() => fetchData(true)} style={styles.refreshBtn} disabled={loading}>🔄 Refresh</button>
         </div>
 
         <div style={styles.tableWrapper}>
