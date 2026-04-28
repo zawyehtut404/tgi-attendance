@@ -1,8 +1,12 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import axios from 'axios';
+import { themes, getTheme, THEME_STORAGE_KEY } from './themes';
+import { makeStyles } from './styles/baseStyles';
+import FloatingItemsBackdrop from './components/FloatingItemsBackdrop';
+import EmployeeSelect from './components/EmployeeSelect';
 
 // --- API Configuration ---
-const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyAKwvv-Z_3oMV5Flv6ADIv3d-hpkfPkadmYtnB40JeNLrsWBRw3tV8-MmcGSpMW3Rw/exec";
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyflN9H_ItSROdpdhQLwryFkE8zBWINmmXi4r8PldKvFClTuvM0u4QPBp8yCILyihRC/exec";
 
 const getTabName = () => {
   const now = new Date();
@@ -25,6 +29,21 @@ const CACHE_META_KEY = 'attendance_cache_meta';
 const FETCH_TTL_MS = 5 * 60 * 1000;
 
 function App() {
+  const [themeKey, setThemeKey] = useState(() => {
+    const saved = localStorage.getItem(THEME_STORAGE_KEY);
+    return saved && themes[saved] ? saved : 'thingyan';
+  });
+  const theme = useMemo(() => getTheme(themeKey), [themeKey]);
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const themeAdminEnabled = useMemo(() => {
+    try {
+      const qs = new URLSearchParams(window.location.search);
+      return qs.get('themeAdmin') === '1';
+    } catch (e) {
+      return false;
+    }
+  }, []);
+
   const [employeeList, setEmployeeList] = useState([]);
   const [summaryRecords, setSummaryRecords] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -41,8 +60,57 @@ function App() {
   const [isSyncing, setIsSyncing] = useState(false);
   const hasFetchedOnMount = useRef(false);
   const syncInFlightRef = useRef(false);
+  const offlineQueueRef = useRef(offlineQueue);
+  const syncRetryTimerRef = useRef(null);
+  const lastSyncAttemptAtRef = useRef(0);
+  const [showSyncDebug, setShowSyncDebug] = useState(false);
+  const telegramDisabledRef = useRef(false);
+  const telegramWarnedRef = useRef(false);
 
   const getTodayString = () => new Date().toLocaleDateString('en-GB');
+
+  const normalizeSheetDate = (v) => (v ? v.toString().replace(/'/g, "").trim() : "");
+
+  const normalizeTimeValue = (v) => {
+    if (!v) return "";
+
+    // Apps Script used to return Date objects for time-only cells; after JSON stringify they look like ISO.
+    // Example: 1899-12-29T18:59:13.000Z. Convert those to a human time string.
+    if (v instanceof Date && !isNaN(v.getTime())) {
+      return v.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true });
+    }
+
+    const s = v.toString().replace(/'/g, "").trim();
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/i.test(s)) {
+      const d = new Date(s);
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true });
+      }
+    }
+
+    return s;
+  };
+
+  const employeeOptions = useMemo(() => {
+    return employeeList.map((emp) => ({ value: emp.Name, label: emp.Name }));
+  }, [employeeList]);
+
+  useEffect(() => {
+    offlineQueueRef.current = offlineQueue;
+  }, [offlineQueue]);
+
+  useEffect(() => {
+    localStorage.setItem(THEME_STORAGE_KEY, themeKey);
+  }, [themeKey]);
+
+  useEffect(() => {
+    return () => {
+      if (syncRetryTimerRef.current) {
+        clearTimeout(syncRetryTimerRef.current);
+        syncRetryTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const postToScript = useCallback(async (payload) => {
     const response = await axios.post(SCRIPT_URL, JSON.stringify(payload), {
@@ -106,10 +174,16 @@ function App() {
     if (cachedSummary) {
       const parsed = JSON.parse(cachedSummary);
       const filtered = parsed.filter(r => {
-        const rowDate = r.Date ? r.Date.toString().replace(/'/g, "").trim() : "";
+        const rowDate = normalizeSheetDate(r.Date);
         return rowDate === todayStr;
       });
-      setSummaryRecords(filtered);
+      const normalized = filtered.map(r => ({
+        ...r,
+        Date: normalizeSheetDate(r.Date),
+        ClockIn: normalizeTimeValue(r.ClockIn),
+        ClockOut: normalizeTimeValue(r.ClockOut)
+      }));
+      setSummaryRecords(normalized);
     }
   }, []);
 
@@ -163,9 +237,16 @@ function App() {
       setEmployeeList(employees);
       localStorage.setItem(EMPLOYEE_CACHE_KEY, JSON.stringify(employees));
 
-      const filtered = attendanceRows.filter(r => r.Date === todayStr);
+      const normalizedRows = attendanceRows.map(r => ({
+        ...r,
+        Date: normalizeSheetDate(r.Date),
+        ClockIn: normalizeTimeValue(r.ClockIn),
+        ClockOut: normalizeTimeValue(r.ClockOut)
+      }));
+
+      const filtered = normalizedRows.filter(r => r.Date === todayStr);
       setSummaryRecords(filtered);
-      localStorage.setItem(SUMMARY_CACHE_KEY, JSON.stringify(filtered));
+      localStorage.setItem(SUMMARY_CACHE_KEY, JSON.stringify(normalizedRows));
       localStorage.setItem(CACHE_META_KEY, JSON.stringify({ fetchedAt: Date.now() }));
     } catch (err) {
       // Load from cache if API fails
@@ -235,6 +316,7 @@ function App() {
   };
 
   const sendTelegramNotification = useCallback(async (name, action, time, status = "") => {
+    if (telegramDisabledRef.current) return;
     try {
       let message = `⏰ ${name} - ${action === 'ClockIn' ? 'Clock In လုပ်လိုက်ပါပြီ' : 'Clock Out လုပ်လိုက်ပါပြီ'}\n`;
       message += `🕒 အချိန်: ${time}\n`;
@@ -242,27 +324,30 @@ function App() {
       await sendTelegramMessage(message);
     } catch (error) {
       console.error("Telegram error:", error);
+      const msg = error?.message || "";
+      if (msg.includes("Telegram properties are missing")) {
+        telegramDisabledRef.current = true;
+        if (!telegramWarnedRef.current) {
+          telegramWarnedRef.current = true;
+          showAlert("Telegram setting မထည့်ထားသေးပါ (Bot token/chat id). Telegram ပို့ခြင်းကို ပိတ်ထားပါမည်", "warning");
+        }
+      }
     }
-  }, [sendTelegramMessage]);
+  }, [sendTelegramMessage, showAlert]);
+
+  const normalizeDate = (v) => (v ? v.toString().replace(/'/g, "").trim() : "");
+  const getQueueKey = (type, name, date) => `${type}|${(name || "").trim()}|${normalizeDate(date)}`;
 
   // --- Sync Offline Data ---
   const syncOfflineRecords = useCallback(async () => {
-    if (offlineQueue.length === 0 || isSyncing || !navigator.onLine || syncInFlightRef.current) return;
+    const queueNow = offlineQueueRef.current || [];
+    if (queueNow.length === 0 || isSyncing || !navigator.onLine || syncInFlightRef.current) return;
 
     syncInFlightRef.current = true;
     setIsSyncing(true);
     try {
-      const queue = [...offlineQueue];
+      const queue = [...queueNow];
       const failedIndices = [];
-      let remoteRecords = [];
-
-    if (queue.some(record => record.type === 'update')) {
-      try {
-        remoteRecords = await fetchSheetRows(ATTENDANCE_TAB);
-      } catch (e) {
-        console.error("Sync preload error:", e);
-      }
-    }
 
     for (let i = 0; i < queue.length; i++) {
       const record = queue[i];
@@ -273,27 +358,39 @@ function App() {
           const cleanTime = record.data.ClockIn.replace(/'/g, "");
           await sendTelegramNotification(record.data.Name, 'ClockIn', cleanTime, record.data.Status);
         } else if (record.type === 'update') {
-          const idx = remoteRecords.findIndex(r => {
-            const rowName = r.Name ? r.Name.toString().trim() : "";
-            const rowDate = r.Date ? r.Date.toString().replace(/'/g, "").trim() : "";
-            const searchName = record.data.Name ? record.data.Name.toString().trim() : "";
-            const searchDate = record.data.Date ? record.data.Date.toString().replace(/'/g, "").trim() : "";
-            return rowName === searchName && rowDate === searchDate;
-          });
-          if (idx !== -1) {
-            await updateSheetRowByMatch(ATTENDANCE_TAB, {
-              Name: record.data.Name,
-              Date: record.data.Date
-            }, record.updateData);
+          // Don't depend on a preload fetch for matching; just attempt updateByMatch.
+          // Also try both date formats (with/without leading apostrophe) to avoid "pending forever"
+          // when sheet/script normalizes values differently.
+          const name = record.data?.Name;
+          const rawDate = record.data?.Date;
+          const cleanDate = normalizeDate(rawDate);
+
+          let updated = false;
+          try {
+            await updateSheetRowByMatch(ATTENDANCE_TAB, { Name: name, Date: rawDate }, record.updateData);
+            updated = true;
+          } catch (e1) {
+            try {
+              await updateSheetRowByMatch(ATTENDANCE_TAB, { Name: name, Date: cleanDate }, record.updateData);
+              updated = true;
+            } catch (e2) {
+              // keep pending
+              record.lastError = e2?.message || e1?.message || 'Update failed';
+              record.lastTriedAt = Date.now();
+            }
+          }
+
+          if (updated) {
             const cleanTime = record.updateData.ClockOut.replace(/'/g, "");
             await sendTelegramNotification(record.data.Name, 'ClockOut', cleanTime);
           } else {
-            // Find မတွေ့ရင် skip မလုပ်ဘဲ failedIndices ထဲထည့်ထားမယ် (Data မပျောက်အောင်)
             failedIndices.push(i);
           }
         }
       } catch (e) {
         console.error("Sync error for item", i, e);
+        record.lastError = e?.message || 'Sync failed';
+        record.lastTriedAt = Date.now();
         failedIndices.push(i);
       }
     }
@@ -306,20 +403,45 @@ function App() {
     if (failedIndices.length === 0) {
       showAlert("Offline မှတ်တမ်းအားလုံး Sync လုပ်ပြီးပါပြီ", "success");
       fetchData(true);
+      if (syncRetryTimerRef.current) {
+        clearTimeout(syncRetryTimerRef.current);
+        syncRetryTimerRef.current = null;
+      }
     } else {
       showAlert(`Sync မပြီးသေးပါ။ Pending ${failedIndices.length} ခု ကျန်နေပါတယ်`, "warning");
+      // Avoid tight retry loops when server/tab/match keeps failing.
+      if (!syncRetryTimerRef.current) {
+        syncRetryTimerRef.current = setTimeout(() => {
+          syncRetryTimerRef.current = null;
+          // Only retry if we're still online and queue still has items.
+          if (navigator.onLine && (offlineQueueRef.current || []).length > 0) {
+            syncOfflineRecords();
+          }
+        }, 30000);
+      }
     }
     } finally {
       setIsSyncing(false);
       syncInFlightRef.current = false;
     }
-  }, [appendSheetRow, fetchData, fetchSheetRows, isSyncing, offlineQueue, sendTelegramNotification, showAlert, updateSheetRowByMatch]);
+  }, [appendSheetRow, fetchData, isSyncing, sendTelegramNotification, showAlert, updateSheetRowByMatch]);
 
   useEffect(() => {
-    if (isOnline) {
+    if (!isOnline) return;
+    if (offlineQueue.length === 0) return;
+
+    // Debounce sync attempts so queue updates don't cause immediate re-sync loops.
+    const MIN_GAP_MS = 3000;
+    const now = Date.now();
+    const waitMs = Math.max(0, MIN_GAP_MS - (now - lastSyncAttemptAtRef.current));
+
+    const t = setTimeout(() => {
+      lastSyncAttemptAtRef.current = Date.now();
       syncOfflineRecords();
-    }
-  }, [isOnline, syncOfflineRecords]);
+    }, waitMs);
+
+    return () => clearTimeout(t);
+  }, [isOnline, offlineQueue.length, syncOfflineRecords]);
 
   const handleAttendance = async (actionType) => {
     if (!selectedName) { showAlert("ကျေးဇူးပြု၍ ဝန်ထမ်းအမည် ရွေးချယ်ပါ", "warning"); return; }
@@ -405,7 +527,24 @@ function App() {
         offlineRecord.data.Date = `'${todayStr}`;
       }
 
-      const newQueue = [...offlineQueue, offlineRecord];
+      // Prevent duplicate pending items (e.g. double-click / refresh / flaky connectivity).
+      const existingKeys = new Set((offlineQueueRef.current || []).map(r => getQueueKey(r.type, r?.data?.Name, r?.data?.Date)));
+      const newKey = getQueueKey(offlineRecord.type, offlineRecord?.data?.Name, offlineRecord?.data?.Date);
+      let newQueue = [...(offlineQueueRef.current || [])];
+
+      if (existingKeys.has(newKey)) {
+        // For updates, keep the latest updateData (latest clock-out time wins).
+        if (offlineRecord.type === 'update') {
+          newQueue = newQueue.map(r => {
+            if (getQueueKey(r.type, r?.data?.Name, r?.data?.Date) === newKey) {
+              return { ...r, updateData: offlineRecord.updateData, timestamp: offlineRecord.timestamp };
+            }
+            return r;
+          });
+        }
+      } else {
+        newQueue.push(offlineRecord);
+      }
       setOfflineQueue(newQueue);
       localStorage.setItem('attendance_offline_queue', JSON.stringify(newQueue));
 
@@ -501,8 +640,18 @@ function App() {
 
   return (
     <div style={styles.container}>
+      <FloatingItemsBackdrop
+        enabled={!!theme.effects?.floatingItems}
+        palette={theme.effects?.floatingPalette}
+        variant={theme.effects?.floatingVariant}
+      />
       <style>{`
         @keyframes fadeInDown { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes bgShift {
+          0% { background-position: 0% 50%; }
+          50% { background-position: 100% 50%; }
+          100% { background-position: 0% 50%; }
+        }
         @keyframes sway { 
           0% { transform: rotate(10deg); } 
           50% { transform: rotate(25deg); } 
@@ -521,18 +670,22 @@ function App() {
       `}</style>
 
       {/* သင်္ကြန်ပွဲတော် အလှဆင် ပိတောက်ပန်းများ */}
-      <img
-        src="https://i.ibb.co/B2Zpj0bx/beautiful-yellow-padauk-flower-isolated-white-background-29544829-removebg-preview.png"
-        alt="Padauk Left"
-        className="flower-sway"
-        style={styles.flowerLeft}
-      />
-      <img
-        src="https://i.ibb.co/B2Zpj0bx/beautiful-yellow-padauk-flower-isolated-white-background-29544829-removebg-preview.png"
-        alt="Padauk Right"
-        className="flower-sway-reverse"
-        style={styles.flowerRight}
-      />
+      {theme.images.decoLeftUrl && (
+        <img
+          src={theme.images.decoLeftUrl}
+          alt="Decoration Left"
+          className="flower-sway"
+          style={styles.flowerLeft}
+        />
+      )}
+      {theme.images.decoRightUrl && (
+        <img
+          src={theme.images.decoRightUrl}
+          alt="Decoration Right"
+          className="flower-sway-reverse"
+          style={styles.flowerRight}
+        />
+      )}
 
       {alert.show && (
         <div className="alert-box" style={{ ...styles.floatingAlert, ...styles[alert.type] }}>
@@ -549,17 +702,67 @@ function App() {
         )}
         {offlineQueue.length > 0 && (
           <div style={styles.syncBadge}>
-            {isSyncing ? '⏳ Syncing...' : `📦 Pending Sync: ${offlineQueue.length}`}
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>{isSyncing ? '⏳ Syncing...' : `📦 Pending Sync: ${offlineQueue.length}`}</div>
+              <button
+                type="button"
+                onClick={() => setShowSyncDebug(v => !v)}
+                style={styles.syncDebugBtn}
+                disabled={loading}
+              >
+                Debug
+              </button>
+            </div>
+            {showSyncDebug && (
+              <div style={styles.syncDebugPanel}>
+                <div style={styles.syncDebugRow}>
+                  <button type="button" onClick={() => syncOfflineRecords()} style={styles.syncActionBtn} disabled={!isOnline || isSyncing}>
+                    Sync now
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOfflineQueue([]);
+                      localStorage.setItem('attendance_offline_queue', JSON.stringify([]));
+                      showAlert('Pending queue cleared', 'warning');
+                    }}
+                    style={styles.syncActionBtnDanger}
+                    disabled={isSyncing}
+                  >
+                    Clear
+                  </button>
+                </div>
+                <pre style={styles.syncDebugPre}>
+                  {JSON.stringify(offlineQueue, null, 2)}
+                </pre>
+              </div>
+            )}
           </div>
         )}
       </div>
 
       <div style={styles.header}>
         <div style={styles.logoCircle}>
-          <img src="https://i.ibb.co/Gvb5m1p5/0b2cb75f-e9f1-43c1-aa40-4ea1b7b522f5-removebg-preview.png" alt="TGI Logo" style={styles.logoImg} />
+          <img src={theme.images.logoUrl} alt="TGI Logo" style={styles.logoImg} />
         </div>
-        <h1 style={styles.mainTitle}>TGI Attendance System</h1>
-        <p style={styles.subTitle}>𝑻𝒉𝒊𝒏𝒈𝒚𝒂𝒏 𝑭𝒆𝒔𝒕𝒊𝒗𝒂𝒍 𝑬𝒅𝒊𝒕𝒊𝒐𝒏 💦</p>
+        <h1 style={styles.mainTitle}>{theme.strings.appTitle}</h1>
+        <p style={styles.subTitle}>{theme.strings.appSubtitle}</p>
+
+        {themeAdminEnabled && (
+          <div style={styles.themeRow}>
+            <label style={styles.themeLabel}>Theme</label>
+            <select
+              value={themeKey}
+              onChange={(e) => setThemeKey(e.target.value)}
+              style={styles.themeSelect}
+              disabled={loading}
+            >
+              {Object.keys(themes).map((k) => (
+                <option key={k} value={k}>{themes[k].label}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <div style={styles.clockContainer}>
           <div style={styles.realTimeClock}>
@@ -574,10 +777,14 @@ function App() {
       <div style={styles.card}>
         <div style={styles.inputGroup}>
           <label style={styles.label}>ဝန်ထမ်းအမည် ရွေးချယ်ရန်</label>
-          <select value={selectedName} onChange={(e) => setSelectedName(e.target.value)} style={styles.select} disabled={loading}>
-            <option value="">-- အမည်ရွေးပါ --</option>
-            {employeeList.map((emp, i) => <option key={i} value={emp.Name}>{emp.Name}</option>)}
-          </select>
+          <EmployeeSelect
+            options={employeeOptions}
+            value={selectedName}
+            onChange={setSelectedName}
+            placeholder="-- အမည်ရွေးပါ --"
+            disabled={loading}
+            styles={styles}
+          />
         </div>
 
         <button onClick={downloadPersonalCSV} style={styles.downloadBtn} disabled={!selectedName || loading}>
@@ -610,18 +817,18 @@ function App() {
             <tbody>
               {summaryRecords.length > 0 ? summaryRecords.map((r, i) => (
                 <tr key={i} style={styles.tableRow}>
-                  <td style={styles.td}><strong>{r.Name}</strong></td>
+                  <td style={{ ...styles.td, ...styles.tdFirst }}><strong>{r.Name}</strong></td>
                   <td style={styles.td}><span style={styles.inTime}>{r.ClockIn || '-'}</span></td>
                   <td style={styles.td}><span style={styles.outTime}>{r.ClockOut || '-'}</span></td>
                   <td style={styles.td}><span style={r.Duration ? styles.durationBadge : styles.emptyBadge}>{r.Duration || '-'}</span></td>
-                  <td style={styles.td}>
+                  <td style={{ ...styles.td, ...styles.tdLast }}>
                     <span style={r.Status === 'Late' ? styles.lateBadge : r.Status === 'On Time' ? styles.onTimeBadge : styles.emptyBadge}>
                       {r.Status || '-'}
                     </span>
                   </td>
                 </tr>
               )) : (
-                <tr><td colSpan="4" style={styles.noData}>ယနေ့အတွက် မှတ်တမ်းမရှိသေးပါ။</td></tr>
+                <tr><td colSpan="5" style={styles.noData}>ယနေ့အတွက် မှတ်တမ်းမရှိသေးပါ။</td></tr>
               )}
             </tbody>
           </table>
@@ -629,116 +836,12 @@ function App() {
       </div>
 
       <footer style={styles.footer}>
-        <p style={styles.footerText}>Wishing you a happy Thingyan! 💦</p>
-        <p style={styles.copytighttext}>© 2026 TGI Japanese Language School. All rights reserved.</p>
-        <p style={styles.devText}>Dev by <strong>Htut</strong></p>
+        <p style={styles.footerText}>{theme.strings.footerGreeting}</p>
+        <p style={styles.copytighttext}>{theme.strings.footerCopyright}</p>
+        <p style={styles.devText}>{theme.strings.footerDev}</p>
       </footer>
     </div>
   );
 }
-
-const styles = {
-  container: {
-    padding: '40px 20px',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    backgroundColor: '#fffbeb',
-    minHeight: '100vh',
-    fontFamily: "'Segoe UI', sans-serif",
-    position: 'relative',
-    overflowX: 'hidden'
-  },
-  flowerLeft: {
-    position: 'absolute',
-    top: '-30px',
-    left: '-5px',
-    width: '200px',
-    height: 'auto',
-    zIndex: 1,
-    pointerEvents: 'none',
-    transformOrigin: 'top center'
-  },
-  flowerRight: {
-    position: 'absolute',
-    top: '-30px',
-    right: '-5px',
-    width: '200px',
-    height: 'auto',
-    zIndex: 1,
-    pointerEvents: 'none',
-    transformOrigin: 'top center'
-  },
-  floatingAlert: { position: 'fixed', top: '25px', padding: '16px 30px', borderRadius: '50px', color: '#fff', zIndex: 1000, fontWeight: '600', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' },
-  success: { backgroundColor: '#10b981' },
-  warning: { backgroundColor: '#f59e0b' },
-  error: { backgroundColor: '#ef4444' },
-  header: { textAlign: 'center', marginBottom: '30px', zIndex: 5 },
-  logoCircle: { width: '85px', height: '85px', borderRadius: '50%', backgroundColor: '#fff', margin: '0 auto 15px', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' },
-  logoImg: { width: '85%', height: 'auto' },
-  mainTitle: { margin: 0, color: '#92400e', fontSize: '30px', fontWeight: '900' },
-  subTitle: { margin: '5px 0 0', color: '#b45309', fontWeight: '600', fontSize: '16px' },
-  clockContainer: { marginTop: '15px', padding: '12px 25px', borderRadius: '25px', backgroundColor: '#fef3c7', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.05)' },
-  realTimeClock: { fontSize: '38px', fontWeight: '800', color: '#d97706', letterSpacing: '1px' },
-  realDate: { fontSize: '14px', color: '#92400e', fontWeight: '500', marginTop: '4px' },
-  card: { padding: '30px 40px', backgroundColor: '#fff', borderRadius: '30px', width: '100%', maxWidth: '450px', marginBottom: '40px', boxShadow: '0 20px 40px rgba(146, 64, 14, 0.1)', zIndex: 5, border: '1px solid #fde68a' },
-  inputGroup: { marginBottom: '20px' },
-  label: { display: 'block', marginBottom: '10px', fontSize: '14px', fontWeight: '600', color: '#92400e' },
-  select: { width: '100%', padding: '16px', borderRadius: '18px', border: '2px solid #fde68a', fontSize: '16px', outline: 'none', cursor: 'pointer', backgroundColor: '#fff' },
-  downloadBtn: { width: '100%', backgroundColor: '#fbbf24', color: '#92400e', border: 'none', padding: '14px', borderRadius: '16px', cursor: 'pointer', fontWeight: '700', marginBottom: '25px', boxShadow: '0 4px 6px rgba(251, 191, 36, 0.2)' },
-  buttonGroup: { display: 'flex', gap: '15px' },
-  button: { flex: 1, padding: '18px', color: '#fff', border: 'none', borderRadius: '18px', cursor: 'pointer', fontWeight: '700', fontSize: '16px' },
-  btnIn: { backgroundColor: '#059669', boxShadow: '0 4px 12px rgba(5, 150, 105, 0.2)' },
-  btnOut: { backgroundColor: '#b45309', boxShadow: '0 4px 12px rgba(220, 38, 38, 0.2)' },
-  tableCard: { width: '100%', maxWidth: '900px', backgroundColor: '#fff', padding: '30px', borderRadius: '32px', boxShadow: '0 10px 30px rgba(0,0,0,0.03)', marginBottom: '40px', zIndex: 5, border: '1px solid #fef3c7' },
-  tableHeaderSection: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px' },
-  tableTitle: { margin: 0, fontSize: '20px', color: '#92400e', fontWeight: '700' },
-  refreshBtn: { border: '1px solid #fde68a', background: '#fef3c7', color: '#92400e', padding: '10px 18px', borderRadius: '14px', cursor: 'pointer', fontWeight: '600' },
-  tableWrapper: { overflowX: 'auto' },
-  table: { width: '100%', borderCollapse: 'separate', borderSpacing: '0 10px' },
-  th: { textAlign: 'left', padding: '15px', color: '#b45309', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px' },
-  tableRow: { backgroundColor: '#fff9f2', transition: 'transform 0.2s' },
-  td: { padding: '18px 15px', color: '#451a03', borderBottom: '1px solid #fef3c7' },
-  inTime: { color: '#059669', fontWeight: '700' },
-  outTime: { color: '#dc2626', fontWeight: '700' },
-  durationBadge: { backgroundColor: '#fbbf24', color: '#92400e', padding: '6px 14px', borderRadius: '12px', fontSize: '13px', fontWeight: '700' },
-  lateBadge: { backgroundColor: '#fee2e2', color: '#dc2626', padding: '6px 14px', borderRadius: '12px', fontSize: '12px', fontWeight: '700', border: '1px solid #fecaca' },
-  onTimeBadge: { backgroundColor: '#d1fae5', color: '#059669', padding: '6px 14px', borderRadius: '12px', fontSize: '12px', fontWeight: '700', border: '1px solid #a7f3d0' },
-  emptyBadge: { color: '#d1d5db' },
-  noData: { textAlign: 'center', padding: '50px', color: '#b45309', fontStyle: 'italic' },
-  footer: { marginTop: 'auto', padding: '30px 0', width: '100%', textAlign: 'center' },
-  footerText: { color: '#d97706', fontSize: '16px', fontWeight: '600', margin: '0 0 5px' },
-  copytighttext: { color: '#b45309', fontSize: '12px', fontWeight: '500', margin: '0 0 5px' },
-  devText: { color: '#b45309', fontSize: '14px', margin: 0, opacity: 0.8 },
-  statusContainer: {
-    position: 'fixed',
-    bottom: '20px',
-    right: '20px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '10px',
-    zIndex: 1000
-  },
-  offlineBadge: {
-    backgroundColor: '#ef4444',
-    color: '#fff',
-    padding: '8px 16px',
-    borderRadius: '12px',
-    fontSize: '14px',
-    fontWeight: '700',
-    boxShadow: '0 4px 12px rgba(239, 68, 68, 0.3)',
-    animation: 'fadeInDown 0.4s ease-out'
-  },
-  syncBadge: {
-    backgroundColor: '#3b82f6',
-    color: '#fff',
-    padding: '8px 16px',
-    borderRadius: '12px',
-    fontSize: '14px',
-    fontWeight: '700',
-    boxShadow: '0 4px 12px rgba(59, 130, 246, 0.3)',
-    animation: 'fadeInDown 0.4s ease-out'
-  }
-};
 
 export default App;

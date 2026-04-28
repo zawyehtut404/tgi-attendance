@@ -13,6 +13,11 @@ Setup
    - `Attendance` or monthly tabs like `Jan`, `Feb`, `Mar`
 6. The first row in each sheet must be headers.
 
+Notes
+
+- Duplicate rows (offline sync): `append` now checks existing rows by `Name + Date + ClockIn` and returns `Duplicate ignored` instead of inserting again (prevents 2-3 duplicates when the client retries).
+- Telegram: if `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` are missing, the backend returns `Telegram properties are missing` and the frontend disables Telegram sending for the session.
+
 Expected headers
 
 Employees
